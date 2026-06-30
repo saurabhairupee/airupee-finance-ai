@@ -98,30 +98,20 @@ const hasAccess = (userPlan, toolMinPlan) => planRank[userPlan] >= planRank[tool
 // Free & Starter (light usage) → Gemini Flash (cheap, fast)
 // Pro & Firm (paying for quality) → Claude Sonnet (best reasoning)
 const callAI = async (prompt, systemPrompt, userPlan) => {
-  const useGemini = userPlan === "free" || userPlan === "starter" || userPlan === "payonce";
+  const useClaude = userPlan === "pro" || userPlan === "firm";
 
-  if (useGemini) {
-    // Gemini Flash — cheap, free-tier friendly, used for free/starter/payonce
-    try {
-      const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!geminiKey) {
-        return "⚠️ Gemini API key not configured. Please contact support.";
-      }
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: `${systemPrompt}\n\n${prompt}` }] }],
-            generationConfig: { maxOutputTokens: 600 }
-          }),
-        }
-      );
-      const data = await response.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, please try again.";
-    } catch {
-      return "Connection error. Please try again.";
+  try {
+    const response = await fetch("/api/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, systemPrompt, useClaude }),
+    });
+    const data = await response.json();
+    return data.text || "Sorry, please try again.";
+  } catch {
+    return "Connection error. Please try again.";
+  }
+};
     }
   } else {
     // Claude Sonnet — Pro & Firm tier, better reasoning for complex outputs
