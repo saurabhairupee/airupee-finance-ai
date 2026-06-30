@@ -97,6 +97,8 @@ const hasAccess = (userPlan, toolMinPlan) => planRank[userPlan] >= planRank[tool
 // ── MODEL ROUTING ─────────────────────────────────────────────
 // Free & Starter (light usage) → Gemini Flash (cheap, fast)
 // Pro & Firm (paying for quality) → Claude Sonnet (best reasoning)
+// All calls go through our own /api/gemini serverless proxy — never
+// call Anthropic or Google directly from the browser (CORS + security).
 const callAI = async (prompt, systemPrompt, userPlan) => {
   const useClaude = userPlan === "pro" || userPlan === "firm";
 
@@ -110,23 +112,6 @@ const callAI = async (prompt, systemPrompt, userPlan) => {
     return data.text || "Sorry, please try again.";
   } catch {
     return "Connection error. Please try again.";
-  }
-};
-    }
-  } else {
-    // Claude Sonnet — Pro & Firm tier, better reasoning for complex outputs
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1200,
-        system: systemPrompt,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    const data = await response.json();
-    return data.content?.[0]?.text || "Sorry, please try again.";
   }
 };
 
