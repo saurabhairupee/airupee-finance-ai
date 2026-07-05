@@ -164,6 +164,9 @@ const UsageBar = ({ userPlan, used, limit }) => {
 function ToolPanel({ tool, userPlan, onUse }) {
   const [input, setInput] = useState("");
   const [result, setResult] = useState("");
+  const [variants, setVariants] = useState(null);
+  const [activeVariant, setActiveVariant] = useState(0);
+  const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const systemPrompts = {
@@ -196,9 +199,49 @@ function ToolPanel({ tool, userPlan, onUse }) {
     if (!input.trim() || loading) return;
     setLoading(true);
     onUse();
-    const res = await callAI(input, systemPrompts[tool.id], userPlan);
-    setResult(res);
+    setResult("");
+    setVariants(null);
+    setCopied(false);
+
+    if (tool.id === "email") {
+      const variantInstruction = `${systemPrompts.email}
+
+Respond ONLY with valid JSON, no markdown, no code fences, no preamble, in exactly this shape:
+{"variants":[{"label":"2-4 word label describing the approach","subject":"Email subject line","body":"Full email body with greeting and sign-off"}]}
+
+Provide 2 to 3 variants representing genuinely different strategic approaches to the situation (for example: firm vs conciliatory, urgent vs patient, formal vs warm) — not just different wording of the same tone.`;
+
+      const res = await callAI(input, variantInstruction, userPlan);
+      try {
+        const cleaned = res.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(cleaned);
+        if (parsed.variants && Array.isArray(parsed.variants) && parsed.variants.length > 0) {
+          setVariants(parsed.variants);
+          setActiveVariant(0);
+        } else {
+          setResult(res);
+        }
+      } catch {
+        // Model didn't return clean JSON — just show the raw text so the
+        // user still gets a usable draft instead of a blank result.
+        setResult(res);
+      }
+    } else {
+      const res = await callAI(input, systemPrompts[tool.id], userPlan);
+      setResult(res);
+    }
     setLoading(false);
+  };
+
+  const copyVariant = async (variant) => {
+    const text = variant.subject ? `Subject: ${variant.subject}\n\n${variant.body}` : variant.body;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard API unavailable — silently ignore, text is still visible to select manually.
+    }
   };
 
   return (
@@ -215,8 +258,37 @@ function ToolPanel({ tool, userPlan, onUse }) {
         background: loading ? C.dim : `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
         color: "white", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontSize: 14
       }}>{loading ? "Working..." : `${tool.icon} ${tool.name}`}</button>
-      {loading && <Spinner />}
-      {result && (
+      {loading && <Spinner label={tool.id === "email" ? "Drafting a few approaches..." : "AI is thinking..."} />}
+
+      {variants && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {variants.map((v, i) => (
+              <button key={i} onClick={() => { setActiveVariant(i); setCopied(false); }} style={{
+                padding: "8px 16px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 700,
+                border: `1.5px solid ${i === activeVariant ? C.accent : C.border}`,
+                background: i === activeVariant ? `${C.accent}22` : "transparent",
+                color: i === activeVariant ? C.accentLight : C.muted,
+              }}>{v.label}</button>
+            ))}
+          </div>
+          <div style={{ background: C.card, border: `1px solid ${C.green}`, borderRadius: 12, padding: 18 }}>
+            {variants[activeVariant].subject && (
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
+                <strong style={{ color: C.text }}>Subject:</strong> {variants[activeVariant].subject}
+              </div>
+            )}
+            <pre style={{ color: C.text, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.7, margin: 0, fontFamily: "inherit" }}>{variants[activeVariant].body}</pre>
+            <button onClick={() => copyVariant(variants[activeVariant])} style={{
+              marginTop: 14, padding: "8px 18px", borderRadius: 8, border: "none", cursor: "pointer",
+              background: copied ? C.green : `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
+              color: "white", fontWeight: 700, fontSize: 12,
+            }}>{copied ? "✓ Copied" : "Copy this draft"}</button>
+          </div>
+        </div>
+      )}
+
+      {!variants && result && (
         <div style={{ background: C.card, border: `1px solid ${C.green}`, borderRadius: 12, padding: 18 }}>
           <pre style={{ color: C.text, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.7, margin: 0, fontFamily: "inherit" }}>{result}</pre>
         </div>
