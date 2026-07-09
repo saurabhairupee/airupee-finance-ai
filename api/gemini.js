@@ -83,7 +83,7 @@ async function callGemini(prompt, systemPrompt, file) {
   }
 
   // ✅ FIXED: Use valid model name
-  const MODEL_NAME = "gemini-1.5-flash";
+  const MODEL_NAME = "gemini-3.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
   console.log("[Gemini] Calling model:", MODEL_NAME);
