@@ -92,6 +92,10 @@ const TOOLS = [
 
 const planRank = { free: 0, payonce: 1, starter: 1, pro: 2, firm: 2 };
 
+// Tools that accept a PDF/image upload in addition to (or instead of) pasted text
+const FILE_TOOLS = ["fraud", "invoice", "contract"];
+const MAX_FILE_MB = 4;
+
 const hasAccess = (userPlan, toolMinPlan) => planRank[userPlan] >= planRank[toolMinPlan];
 
 // ── MODEL ROUTING ─────────────────────────────────────────────
@@ -99,14 +103,14 @@ const hasAccess = (userPlan, toolMinPlan) => planRank[userPlan] >= planRank[tool
 // Pro & Firm (paying for quality) → Claude Sonnet (best reasoning)
 // All calls go through our own /api/gemini serverless proxy — never
 // call Anthropic or Google directly from the browser (CORS + security).
-const callAI = async (prompt, systemPrompt, userPlan) => {
+const callAI = async (prompt, systemPrompt, userPlan, file = null) => {
   const useClaude = userPlan === "pro" || userPlan === "firm";
 
   try {
     const response = await fetch("/api/gemini", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, systemPrompt, useClaude }),
+      body: JSON.stringify({ prompt, systemPrompt, useClaude, file }),
     });
     const data = await response.json();
     return data.text || "Sorry, please try again.";
@@ -167,7 +171,12 @@ function ToolPanel({ tool, userPlan, onUse }) {
   const [variants, setVariants] = useState(null);
   const [activeVariant, setActiveVariant] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [tone, setTone] = useState("Formal");
+  const [file, setFile] = useState(null); // { name, mediaType, data, sizeMB }
+  const [fileError, setFileError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const TONES = ["Formal", "Casual", "Friendly", "Urgent", "Firm"];
 
   const systemPrompts = {
     chat: "You are an expert Finance AI assistant specializing in Indian finance, accounting, IFRS, and corporate finance. Give precise, practical, professional answers. Use ₹ for Indian Rupee.",
@@ -195,8 +204,30 @@ function ToolPanel({ tool, userPlan, onUse }) {
     contract: "Paste contract text here...",
   };
 
+  const handleFile = (selected) => {
+    setFileError("");
+    if (!selected) return;
+    const sizeMB = selected.size / (1024 * 1024);
+    const allowedTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
+    if (!allowedTypes.includes(selected.type)) {
+      setFileError("Please upload a PDF, PNG, JPG, or WEBP file.");
+      return;
+    }
+    if (sizeMB > MAX_FILE_MB) {
+      setFileError(`File is too large — please keep it under ${MAX_FILE_MB}MB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(",")[1];
+      setFile({ name: selected.name, mediaType: selected.type, data: base64, sizeMB: sizeMB.toFixed(1) });
+    };
+    reader.onerror = () => setFileError("Couldn't read that file — please try again.");
+    reader.readAsDataURL(selected);
+  };
+
   const run = async () => {
-    if (!input.trim() || loading) return;
+    if ((!input.trim() && !file) || loading) return;
     setLoading(true);
     onUse();
     setResult("");
@@ -206,10 +237,12 @@ function ToolPanel({ tool, userPlan, onUse }) {
     if (tool.id === "email") {
       const variantInstruction = `${systemPrompts.email}
 
+The user has selected "${tone}" as their preferred tone for this email.
+
 Respond ONLY with valid JSON, no markdown, no code fences, no preamble, in exactly this shape:
 {"variants":[{"label":"2-4 word label describing the approach","subject":"Email subject line","body":"Full email body with greeting and sign-off"}]}
 
-Provide 2 to 3 variants representing genuinely different strategic approaches to the situation (for example: firm vs conciliatory, urgent vs patient, formal vs warm) — not just different wording of the same tone.`;
+The FIRST variant must be written strictly in the "${tone}" tone the user asked for. Provide 1-2 additional variants as alternate strategic approaches (for example: a firmer or softer version, more urgent or more patient) so the user has real options — but all variants should still fit a professional finance context.`;
 
       const res = await callAI(input, variantInstruction, userPlan);
       try {
@@ -227,7 +260,8 @@ Provide 2 to 3 variants representing genuinely different strategic approaches to
         setResult(res);
       }
     } else {
-      const res = await callAI(input, systemPrompts[tool.id], userPlan);
+      const promptText = input.trim() || "Analyze the attached document.";
+      const res = await callAI(promptText, systemPrompts[tool.id], userPlan, file);
       setResult(res);
     }
     setLoading(false);
@@ -250,10 +284,46 @@ Provide 2 to 3 variants representing genuinely different strategic approaches to
         <span style={{ fontSize: 11, color: C.muted }}>Powered by <strong style={{ color: C.accentLight }}>{PLANS[userPlan]?.model}</strong></span>
         <span style={{ fontSize: 10, background: `${C.purple}22`, color: C.purple, padding: "3px 10px", borderRadius: 10 }}>{tool.category}</span>
       </div>
+      {tool.id === "email" && (
+        <div>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Choose a tone</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {TONES.map(t => (
+              <button key={t} onClick={() => setTone(t)} style={{
+                padding: "7px 16px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 700,
+                border: `1.5px solid ${tone === t ? C.accent : C.border}`,
+                background: tone === t ? `${C.accent}22` : "transparent",
+                color: tone === t ? C.accentLight : C.muted,
+              }}>{t}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {FILE_TOOLS.includes(tool.id) && (
+        <div>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Upload a PDF or image (optional — you can also paste text below)</div>
+          <label style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10,
+            border: `1.5px dashed ${file ? C.green : C.border}`, background: C.card, cursor: "pointer",
+          }}>
+            <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp"
+              onChange={e => handleFile(e.target.files?.[0])}
+              style={{ display: "none" }} />
+            <span style={{ fontSize: 18 }}>📎</span>
+            <span style={{ fontSize: 12, color: file ? C.greenLight : C.muted, flex: 1 }}>
+              {file ? `${file.name} (${file.sizeMB}MB)` : "Click to choose a file — PDF, PNG, JPG, or WEBP, up to " + MAX_FILE_MB + "MB"}
+            </span>
+            {file && (
+              <span onClick={(e) => { e.preventDefault(); setFile(null); }} style={{ fontSize: 12, color: C.red, cursor: "pointer", fontWeight: 700 }}>Remove</span>
+            )}
+          </label>
+          {fileError && <div style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{fileError}</div>}
+        </div>
+      )}
       <textarea value={input} onChange={e => setInput(e.target.value)} rows={6}
         placeholder={placeholders[tool.id]}
         style={{ width: "100%", padding: 14, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 13, resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: tool.id === "invoice" || tool.id === "fraud" || tool.id === "contract" ? "monospace" : "inherit" }} />
-      <button onClick={run} disabled={loading || !input.trim()} style={{
+      <button onClick={run} disabled={loading || (!input.trim() && !file)} style={{
         padding: "12px 24px", borderRadius: 10, border: "none",
         background: loading ? C.dim : `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
         color: "white", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontSize: 14
