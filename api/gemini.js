@@ -37,13 +37,22 @@ async function callGroq(prompt, systemPrompt, premium = false) {
   return data.choices?.[0]?.message?.content || null;
 }
 
-// Gemini call — supports an optional { mediaType, data } file (base64, no data: prefix).
+// Gemini call — supports an optional single { mediaType, data } file, OR a
+// `files` array of { label, mediaType, data } for multi-document tools.
 // Returns { text, status } so the caller can detect 429s.
-async function callGemini(prompt, systemPrompt, file) {
-  const parts = [{ text: `${systemPrompt}\n\n${prompt}` }];
-  if (file) {
-    parts.unshift({ inlineData: { mimeType: file.mediaType, data: file.data } });
+async function callGemini(prompt, systemPrompt, file, files) {
+  const parts = [];
+  if (files && files.length > 0) {
+    for (const f of files) {
+      parts.push({ text: `The following document is: ${f.label}` });
+      parts.push({ inlineData: { mimeType: f.mediaType, data: f.data } });
+    }
+  } else if (file) {
+    parts.push({ inlineData: { mimeType: file.mediaType, data: file.data } });
   }
+  parts.push({ text: `${systemPrompt}\n\n${prompt}` });
+
+  const hasAnyFile = file || (files && files.length > 0);
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -52,7 +61,7 @@ async function callGemini(prompt, systemPrompt, file) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { maxOutputTokens: file ? 3000 : 800 },
+        generationConfig: { maxOutputTokens: hasAnyFile ? 3000 : 800 },
       }),
     }
   );
@@ -77,11 +86,20 @@ async function callGemini(prompt, systemPrompt, file) {
   return { status: 200, text };
 }
 
-// Claude call — supports an optional { mediaType, data } file, sent as a
-// document (PDF) or image content block ahead of the text prompt.
-async function callClaude(prompt, systemPrompt, file) {
+// Claude call — supports an optional single { mediaType, data } file, OR a
+// `files` array of { label, mediaType, data } for multi-document tools.
+async function callClaude(prompt, systemPrompt, file, files) {
   const content = [];
-  if (file) {
+  if (files && files.length > 0) {
+    for (const f of files) {
+      const isPdf = f.mediaType === "application/pdf";
+      content.push({ type: "text", text: `The following document is: ${f.label}` });
+      content.push({
+        type: isPdf ? "document" : "image",
+        source: { type: "base64", media_type: f.mediaType, data: f.data },
+      });
+    }
+  } else if (file) {
     const isPdf = file.mediaType === "application/pdf";
     content.push({
       type: isPdf ? "document" : "image",
@@ -89,6 +107,8 @@ async function callClaude(prompt, systemPrompt, file) {
     });
   }
   content.push({ type: "text", text: prompt });
+
+  const hasAnyFile = file || (files && files.length > 0);
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -99,7 +119,7 @@ async function callClaude(prompt, systemPrompt, file) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: file ? 3000 : 1200,
+      max_tokens: hasAnyFile ? 3000 : 1200,
       system: systemPrompt,
       messages: [{ role: "user", content }],
     }),
@@ -129,14 +149,15 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { prompt, systemPrompt, useClaude, file } = req.body;
+  const { prompt, systemPrompt, useClaude, file, files } = req.body;
+  const hasAnyFile = file || (files && files.length > 0);
 
   try {
     if (useClaude) {
       // Pro & Firm tier — try Claude Sonnet first if a key is configured
       // (Claude can read the uploaded PDF/image directly).
       if (process.env.ANTHROPIC_API_KEY) {
-        const text = await callClaude(prompt, systemPrompt, file);
+        const text = await callClaude(prompt, systemPrompt, file, files);
         if (text) return res.status(200).json({ text });
       } else {
         console.warn("ANTHROPIC_API_KEY not set — routing premium request to fallback.");
@@ -144,8 +165,8 @@ export default async function handler(req, res) {
 
       // No Claude available. If there's an attached file, Groq can't read
       // it (text-only model) — try Gemini instead, since it can handle files.
-      if (file) {
-        const geminiResult = await callGemini(prompt, systemPrompt, file);
+      if (hasAnyFile) {
+        const geminiResult = await callGemini(prompt, systemPrompt, file, files);
         if (geminiResult.text) return res.status(200).json({ text: geminiResult.text });
         return res.status(200).json({
           text: "Document analysis needs Claude or Gemini access, and both are temporarily unavailable. Please try again shortly, or paste the key details as text instead.",
@@ -160,18 +181,18 @@ export default async function handler(req, res) {
     } else {
       // Free, Starter & Pay-once tier — Gemini Flash (handles files too),
       // with one retry on 429, then a Groq fallback for TEXT-ONLY requests.
-      let result = await callGemini(prompt, systemPrompt, file);
+      let result = await callGemini(prompt, systemPrompt, file, files);
 
       if (result.status === 429) {
         await sleep(1200);
-        result = await callGemini(prompt, systemPrompt, file);
+        result = await callGemini(prompt, systemPrompt, file, files);
       }
 
       if (result.text) {
         return res.status(200).json({ text: result.text });
       }
 
-      if (file) {
+      if (hasAnyFile) {
         // Groq can't read files — no safe fallback here, be upfront about it.
         return res.status(200).json({
           text: "Document analysis is temporarily unavailable — please try again in a moment, or paste the key details as text instead.",
