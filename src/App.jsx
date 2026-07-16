@@ -528,7 +528,7 @@ export default function FinanceAIApp() {
         </div>
       );
     }
-    return <ToolPanel tool={activeTool} userPlan={userPlan} onUse={recordUsage} />;
+    return <ToolPanel key={activeTool.id} tool={activeTool} userPlan={userPlan} onUse={recordUsage} />;
   };
 
   if (session === undefined || (session && !profileReady)) {
