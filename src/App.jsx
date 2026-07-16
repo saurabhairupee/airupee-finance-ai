@@ -23,7 +23,7 @@ const C = {
 
 // ── PLANS ──────────────────────────────────────────────────────
 const PLANS = {
-  free: { id: "free", name: "FREE", color: C.muted, model: "Gemini Flash", queriesPerDay: 2 },
+  free: { id: "free", name: "FREE", color: C.muted, model: "Gemini Flash", queriesPerDay: 4 },
   payonce: { id: "payonce", name: "PAY-ONCE", color: C.pink, model: "Gemini Flash", queriesPerDay: "1 task" },
   starter: { id: "starter", name: "STARTER", color: C.accent, model: "Gemini Flash", queriesPerDay: 30 },
   pro: { id: "pro", name: "PRO", color: C.green, model: "Claude Sonnet", queriesPerDay: "Unlimited" },
@@ -38,82 +38,111 @@ const planCards = [
   { ...PLANS.firm, price: "₹2,999", period: "/month", icon: "🏢", desc: "CA firms & teams", tools: 10, badge: "10 USERS" },
 ];
 
-// ── TOOLS — outcome-based naming ─────────────────────────────────
+// ── TOOLS ──────────────────────────────────────────────────────
 const TOOLS = [
   {
     id: "chat", icon: "💬", name: "Get Instant Finance Answers", category: "Core",
     desc: "Ask anything — IFRS, GST, tax, investing, journal entries",
     minPlan: "free", modelTier: "light",
+    samples: [
+      { label: "IFRS 15 Revenue", text: "Explain IFRS 15 revenue recognition with a practical example for a SaaS company in India. Include the 5-step model and journal entries." },
+      { label: "GST on Services", text: "What is the GST rate and HSN code for professional consulting services provided by a CA firm in Bangalore to a client in Mumbai? Is IGST applicable?" },
+      { label: "Journal Entry", text: "A company purchases machinery for ₹5,00,000 + 18% GST on 15 Oct 2025. Paid 50% by cheque, balance on credit. Show the journal entry under Ind AS." },
+    ]
   },
   {
     id: "tax", icon: "🧾", name: "Get Tax & GST Guidance", category: "Compliance",
     desc: "India GST, Income Tax, TDS rates with real examples",
     minPlan: "free", modelTier: "light",
+    samples: [
+      { label: "TDS on Rent", text: "What is the TDS rate under Section 194I for commercial rent of ₹45,000 per month? When should it be deducted and deposited?" },
+      { label: "Old vs New Regime", text: "For FY 2025-26, compare old vs new tax regime for a salaried person with ₹18L income, ₹1.5L 80C, ₹50K NPS, HRA ₹2.4L. Which is better?" },
+      { label: "GST Input Credit", text: "A manufacturer buys raw materials with ₹50,000 GST paid. They sell finished goods with ₹80,000 GST collected. Calculate net GST liability and input credit available." },
+    ]
   },
   {
     id: "email", icon: "📧", name: "Get Your Finance Email Drafted", category: "Communication",
     desc: "Professional emails — vendor reminders, audit responses, approvals",
     minPlan: "free", modelTier: "light",
+    samples: [
+      { label: "Payment Reminder", text: "Draft a polite but firm email to a vendor whose invoice of ₹2,50,000 is 45 days overdue. Mention late payment terms and request immediate settlement." },
+      { label: "Audit Response", text: "Write a professional response to a GST officer's ASMT-10 notice regarding mismatch in GSTR-1 vs 3B for Q1 2026." },
+    ]
   },
   {
     id: "invoice", icon: "📄", name: "Get Your Invoice GL-Coded", category: "Operations",
     desc: "Extract data, suggest GL codes, flag issues automatically",
     minPlan: "free", modelTier: "light",
+    samples: [
+      { label: "Hotel Invoice", text: "Invoice from Taj Hotels: Room charges ₹15,000, Food ₹3,500, GST 12% on room, 5% on food, Service charge 10%. Suggest GL codes for a manufacturing company." },
+    ]
   },
   {
     id: "gst_reco", icon: "🔄", name: "Get Your GST Reconciled", category: "Compliance",
     desc: "Match Purchase Register vs GSTR-2B, flag ITC risk & vendor issues",
     minPlan: "starter", modelTier: "heavy",
     fileSlots: ["Purchase Register", "GSTR-2B"],
+    samples: []
   },
   {
     id: "ratio", icon: "📐", name: "Get Your Financial Ratios Calculated", category: "Reporting",
     desc: "15+ liquidity, profitability, efficiency & leverage ratios with commentary",
     minPlan: "starter", modelTier: "heavy",
+    samples: [
+      { label: "Quick Analysis", text: "Revenue: ₹1,20,00,000 | COGS: ₹72,00,000 | Current Assets: ₹35,00,000 | Current Liabilities: ₹20,00,000 | Debt: ₹15,00,000 | Equity: ₹40,00,000. Calculate and interpret key ratios." },
+    ]
   },
   {
     id: "variance", icon: "📊", name: "Get Your Variance Report Written", category: "Reporting",
     desc: "CFO-level budget vs actual commentary, ready to send",
     minPlan: "starter", modelTier: "heavy",
+    samples: [
+      { label: "Monthly Variance", text: "Revenue Budget: ₹50L, Actual: ₹46.5L | Marketing Budget: ₹3L, Actual: ₹4.2L | Salaries Budget: ₹12L, Actual: ₹11.8L. Write a CFO commentary for the board." },
+    ]
   },
   {
     id: "commentary", icon: "✍️", name: "Get Your Board Report Drafted", category: "Reporting",
     desc: "Board reports, MD&A, investor updates — formal & polished",
     minPlan: "starter", modelTier: "heavy",
+    samples: [
+      { label: "Q2 Board Report", text: "Company: TechServe Pvt Ltd | Period: Q2 FY26 | Revenue: ₹8.5Cr (up 12% YoY) | EBITDA: ₹1.2Cr (margin 14%) | New clients: 3 | Challenges: delayed payments from 2 major clients. Draft MD&A section." },
+    ]
   },
   {
     id: "cashflow", icon: "💰", name: "Get Your Cash Flow Forecasted", category: "Planning",
     desc: "3-12 month cash position prediction with liquidity risk flags",
     minPlan: "pro", modelTier: "heavy",
+    samples: [
+      { label: "6-Month Forecast", text: "Opening balance: ₹25L | Monthly inflows: ₹15L (receivables) | Monthly outflows: ₹12L (salaries ₹8L, rent ₹1.5L, vendors ₹2.5L) | One-time: Tax payment ₹8L in month 3. Forecast 6 months." },
+    ]
   },
   {
     id: "fraud", icon: "🔍", name: "Get Your Transactions Fraud-Checked", category: "Audit",
     desc: "Spot duplicates, anomalies, suspicious patterns automatically",
     minPlan: "pro", modelTier: "heavy",
+    samples: [
+      { label: "Vendor Analysis", text: "Analyze these payments: Vendor A ₹49,999 (threshold ₹50K), Vendor A ₹49,999 (same day), Vendor B ₹1,20,000 (no PO), Vendor C ₹25,000 (weekend payment). Flag red flags." },
+    ]
   },
   {
     id: "contract", icon: "📑", name: "Get Your Contract Risk-Analyzed", category: "Operations",
     desc: "Extract financial terms, flag risky clauses, plain-English summary",
     minPlan: "pro", modelTier: "heavy",
+    samples: [
+      { label: "Vendor Contract", text: "Review this clause: 'Payment terms: Net 60 days. Late fee: 0.5% per month. Force majeure: Unlimited suspension. Termination: 90 days notice by either party, but vendor may withhold deliverables during notice period.' Flag risks." },
+    ]
   },
 ];
 
 const planRank = { free: 0, payonce: 1, starter: 1, pro: 2, firm: 2 };
 
-// Tools that accept a PDF/image upload in addition to (or instead of) pasted text
 const FILE_TOOLS = ["fraud", "invoice", "contract"];
 const MAX_FILE_MB = 4;
 
 const hasAccess = (userPlan, toolMinPlan) => planRank[userPlan] >= planRank[toolMinPlan];
 
-// ── MODEL ROUTING ─────────────────────────────────────────────
-// Free & Starter (light usage) → Gemini Flash (cheap, fast)
-// Pro & Firm (paying for quality) → Claude Sonnet (best reasoning)
-// All calls go through our own /api/gemini serverless proxy — never
-// call Anthropic or Google directly from the browser (CORS + security).
 const callAI = async (prompt, systemPrompt, userPlan, file = null, files = null) => {
   const useClaude = userPlan === "pro" || userPlan === "firm";
-
   try {
     const response = await fetch("/api/gemini", {
       method: "POST",
@@ -134,7 +163,76 @@ const Spinner = ({ label = "AI is thinking..." }) => (
   </div>
 );
 
-const LockedPanel = ({ tool, onUpgrade }) => {
+// ── TOOLTIP COMPONENT ─────────────────────────────────────────
+function Tooltip({ children, content, position = "top" }) {
+  const [visible, setVisible] = useState(false);
+  const posStyles = {
+    top: { bottom: "100%", left: "50%", transform: "translateX(-50%)", marginBottom: 8 },
+    bottom: { top: "100%", left: "50%", transform: "translateX(-50%)", marginTop: 8 },
+    left: { right: "100%", top: "50%", transform: "translateY(-50%)", marginRight: 8 },
+    right: { left: "100%", top: "50%", transform: "translateY(-50%)", marginLeft: 8 },
+  };
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}
+      onMouseEnter={() => setVisible(true)}
+      onMouseLeave={() => setVisible(false)}>
+      {children}
+      {visible && (
+        <div style={{
+          position: "absolute",
+          ...posStyles[position],
+          background: C.card,
+          border: `1px solid ${C.border}`,
+          borderRadius: 10,
+          padding: "12px 16px",
+          minWidth: 240,
+          maxWidth: 320,
+          zIndex: 100,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          fontSize: 12,
+          lineHeight: 1.6,
+          color: C.text,
+        }}>
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── GUEST BADGE WITH TOOLTIP ─────────────────────────────────
+function GuestBadge({ userPlan, onLogin }) {
+  const tooltipContent = (
+    <div>
+      <div style={{ fontWeight: 700, marginBottom: 8, color: C.accentLight }}>🚀 Why create a free account?</div>
+      <div style={{ color: C.muted, marginBottom: 6 }}>✅ Save query history across sessions</div>
+      <div style={{ color: C.muted, marginBottom: 6 }}>✅ Access all 4 free tools anytime</div>
+      <div style={{ color: C.muted, marginBottom: 6 }}>✅ 4 queries per day (resets daily)</div>
+      <div style={{ color: C.muted, marginBottom: 10 }}>✅ Export results to copy/paste</div>
+      <button onClick={onLogin} style={{
+        width: "100%", padding: "8px 12px", borderRadius: 6, border: "none",
+        background: `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
+        color: "white", fontWeight: 700, cursor: "pointer", fontSize: 12,
+      }}>Create Free Account →</button>
+    </div>
+  );
+
+  return (
+    <Tooltip content={tooltipContent} position="bottom">
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        background: `${C.amber}18`, border: `1px solid ${C.amber}40`,
+        padding: "4px 10px", borderRadius: 16, cursor: "pointer",
+      }}>
+        <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.amber }} />
+        <span style={{ fontSize: 11, color: C.amber, fontWeight: 700 }}>{PLANS[userPlan].name} (Guest)</span>
+        <span style={{ fontSize: 10, color: C.amber, opacity: 0.7 }}>?</span>
+      </div>
+    </Tooltip>
+  );
+}
+
+const LockedPanel = ({ tool, onUpgrade, onLogin }) => {
   const requiredPlanCard = planCards.find(p => p.id === tool.minPlan);
   return (
     <div style={{ padding: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }}>
@@ -143,7 +241,7 @@ const LockedPanel = ({ tool, onUpgrade }) => {
       <div style={{ fontSize: 13, color: C.muted, marginBottom: 24, maxWidth: 360 }}>
         Upgrade to {requiredPlanCard?.name} ({requiredPlanCard?.price}{requiredPlanCard?.period}) to unlock this tool, or buy a single ₹49 task pack.
       </div>
-      <div style={{ display: "flex", gap: 10 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
         <button onClick={() => onUpgrade(tool.minPlan)} style={{
           padding: "10px 22px", borderRadius: 10, border: "none",
           background: `linear-gradient(135deg, ${requiredPlanCard?.color}, ${requiredPlanCard?.color}cc)`,
@@ -153,17 +251,25 @@ const LockedPanel = ({ tool, onUpgrade }) => {
           padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.pink}`,
           background: "transparent", color: C.pink, fontWeight: 700, cursor: "pointer", fontSize: 13
         }}>Try once — ₹49</button>
+        {onLogin && (
+          <button onClick={onLogin} style={{
+            padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.accent}`,
+            background: "transparent", color: C.accentLight, fontWeight: 700, cursor: "pointer", fontSize: 13
+          }}>Log in to access →</button>
+        )}
       </div>
     </div>
   );
 };
 
-const UsageBar = ({ userPlan, used, limit }) => {
+const UsageBar = ({ userPlan, used, limit, isGuest }) => {
   if (limit === "Unlimited" || limit === "1 task") return null;
   const pct = Math.min(100, (used / limit) * 100);
   return (
     <div style={{ padding: "10px 24px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 12 }}>
-      <span style={{ fontSize: 11, color: C.muted, whiteSpace: "nowrap" }}>{used}/{limit} queries today</span>
+      <span style={{ fontSize: 11, color: C.muted, whiteSpace: "nowrap" }}>
+        {used}/{limit} queries today{isGuest ? " (guest)" : ""}
+      </span>
       <div style={{ flex: 1, height: 5, background: C.border, borderRadius: 3, maxWidth: 200 }}>
         <div style={{ height: "100%", width: `${pct}%`, background: pct > 80 ? C.red : C.accent, borderRadius: 3, transition: "width 0.3s" }} />
       </div>
@@ -172,24 +278,59 @@ const UsageBar = ({ userPlan, used, limit }) => {
   );
 };
 
+// ── SAMPLE QUERIES COMPONENT ──────────────────────────────────
+function SampleQueries({ tool, onSelect, isGuest }) {
+  if (!tool.samples || tool.samples.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 11, color: C.greenLight, fontWeight: 700 }}>✨ Try these examples</span>
+        <span style={{ fontSize: 10, color: C.dim, background: `${C.green}15`, padding: "2px 8px", borderRadius: 10 }}>No quota used</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {tool.samples.map((sample, i) => (
+          <button
+            key={i}
+            onClick={() => onSelect(sample.text)}
+            style={{
+              textAlign: "left", padding: "10px 14px", borderRadius: 8,
+              border: `1px solid ${C.border}`, background: `${C.accent}08`,
+              color: C.accentLight, fontSize: 12, cursor: "pointer",
+              fontWeight: 500, lineHeight: 1.4,
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = `${C.accent}18`; e.currentTarget.style.borderColor = C.accent; }}
+            onMouseLeave={e => { e.currentTarget.style.background = `${C.accent}08`; e.currentTarget.style.borderColor = C.border; }}
+          >
+            <span style={{ fontSize: 10, color: C.dim, display: "block", marginBottom: 4, fontWeight: 700 }}>{sample.label}</span>
+            <span style={{ color: C.text, opacity: 0.85 }}>{sample.text.length > 120 ? sample.text.slice(0, 120) + "..." : sample.text}</span>
+            <span style={{ fontSize: 10, color: C.green, display: "block", marginTop: 4 }}>▶ Click to try (free)</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── GENERIC TOOL PANEL ────────────────────────────────────────
-function ToolPanel({ tool, userPlan, onUse, session }) {
+function ToolPanel({ tool, userPlan, onUse, session, onLogin }) {
   const [input, setInput] = useState("");
   const [result, setResult] = useState("");
   const [variants, setVariants] = useState(null);
   const [activeVariant, setActiveVariant] = useState(0);
   const [copied, setCopied] = useState(false);
   const [tone, setTone] = useState("Formal");
-  const [file, setFile] = useState(null); // { name, mediaType, data, sizeMB }
-  const [files, setFiles] = useState({}); // { [slotLabel]: { name, mediaType, data, sizeMB } } — for multi-file tools
+  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState({});
   const [fileError, setFileError] = useState("");
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const TONES = ["Formal", "Casual", "Friendly", "Urgent", "Firm"];
 
-  // Load this user's last 10 Q&A for this specific tool
   useEffect(() => {
     if (!session) return;
     (async () => {
@@ -298,11 +439,11 @@ Be precise with figures, use ₹ for amounts, and keep the tone professional and
     reader.readAsDataURL(selected);
   };
 
-  const run = async () => {
+  const run = async (demoMode = false) => {
     const hasMultiFiles = tool.fileSlots && Object.keys(files).length > 0;
     if ((!input.trim() && !file && !hasMultiFiles) || loading) return;
     setLoading(true);
-    onUse();
+    if (!demoMode) onUse();
     setResult("");
     setVariants(null);
     setCopied(false);
@@ -324,16 +465,14 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
         if (parsed.variants && Array.isArray(parsed.variants) && parsed.variants.length > 0) {
           setVariants(parsed.variants);
           setActiveVariant(0);
-          saveToHistory(input, JSON.stringify(parsed.variants));
+          if (!demoMode) saveToHistory(input, JSON.stringify(parsed.variants));
         } else {
           setResult(res);
-          saveToHistory(input, res);
+          if (!demoMode) saveToHistory(input, res);
         }
       } catch {
-        // Model didn't return clean JSON — just show the raw text so the
-        // user still gets a usable draft instead of a blank result.
         setResult(res);
-        saveToHistory(input, res);
+        if (!demoMode) saveToHistory(input, res);
       }
     } else if (tool.fileSlots) {
       const uploadedSlots = Object.entries(files).map(([label, f]) => ({ label, mediaType: f.mediaType, data: f.data }));
@@ -341,14 +480,21 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
       const res = await callAI(promptText, systemPrompts[tool.id], userPlan, null, uploadedSlots);
       setResult(res);
       const fileNames = Object.entries(files).map(([label, f]) => `${label}: ${f.name}`).join(", ");
-      saveToHistory(fileNames ? `[${fileNames}] ${input}`.trim() : promptText, res);
+      if (!demoMode) saveToHistory(fileNames ? `[${fileNames}] ${input}`.trim() : promptText, res);
     } else {
       const promptText = input.trim() || "Analyze the attached document.";
       const res = await callAI(promptText, systemPrompts[tool.id], userPlan, file);
       setResult(res);
-      saveToHistory(file ? `[File: ${file.name}] ${input}`.trim() : promptText, res);
+      if (!demoMode) saveToHistory(file ? `[File: ${file.name}] ${input}`.trim() : promptText, res);
     }
     setLoading(false);
+  };
+
+  const handleSampleClick = (sampleText) => {
+    setInput(sampleText);
+    setIsDemo(true);
+    // Auto-run after a brief delay so user sees the input populated
+    setTimeout(() => run(true), 100);
   };
 
   const copyVariant = async (variant) => {
@@ -357,9 +503,7 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // Clipboard API unavailable — silently ignore, text is still visible to select manually.
-    }
+    } catch {}
   };
 
   return (
@@ -387,7 +531,7 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
               try {
                 const parsed = JSON.parse(h.output);
                 if (Array.isArray(parsed)) { setVariants(parsed); setActiveVariant(0); setResult(""); return; }
-              } catch { /* not JSON, treat as plain text */ }
+              } catch {}
               setVariants(null);
               setResult(h.output || "");
             }} style={{
@@ -400,6 +544,9 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
           ))}
         </div>
       )}
+
+      {/* SAMPLE QUERIES — no quota used */}
+      <SampleQueries tool={tool} onSelect={handleSampleClick} isGuest={!session} />
 
       {tool.id === "email" && (
         <div>
@@ -469,12 +616,19 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
       <textarea value={input} onChange={e => setInput(e.target.value)} rows={6}
         placeholder={placeholders[tool.id]}
         style={{ width: "100%", padding: 14, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 13, resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: tool.id === "invoice" || tool.id === "fraud" || tool.id === "contract" ? "monospace" : "inherit" }} />
-      <button onClick={run} disabled={loading || (!input.trim() && !file && !(tool.fileSlots && Object.keys(files).length > 0))} style={{
+      <button onClick={() => run(false)} disabled={loading || (!input.trim() && !file && !(tool.fileSlots && Object.keys(files).length > 0))} style={{
         padding: "12px 24px", borderRadius: 10, border: "none",
         background: loading ? C.dim : `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
         color: "white", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontSize: 14
       }}>{loading ? "Working..." : `${tool.icon} ${tool.name}`}</button>
       {loading && <Spinner label={tool.id === "email" ? "Drafting a few approaches..." : "AI is thinking..."} />}
+
+      {isDemo && result && (
+        <div style={{ background: `${C.green}10`, border: `1px dashed ${C.green}`, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: C.greenLight }}>✨ This was a demo query — no quota used!</span>
+          <button onClick={() => setIsDemo(false)} style={{ fontSize: 10, color: C.dim, background: "transparent", border: "none", cursor: "pointer", marginLeft: "auto" }}>Dismiss</button>
+        </div>
+      )}
 
       {variants && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -544,7 +698,6 @@ function PricingView({ userPlan, onSelectPlan }) {
         ))}
       </div>
 
-      {/* Tool access grid */}
       <div style={{ marginTop: 32 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>What Each Plan Unlocks</div>
         <div style={{ overflowX: "auto" }}>
@@ -581,8 +734,10 @@ export default function FinanceAIApp() {
   const [active, setActive] = useState("chat");
   const [userPlan, setUserPlan] = useState("free");
   const [usage, setUsage] = useState({});
-  const [session, setSession] = useState(undefined); // undefined = checking, null = logged out
+  const [session, setSession] = useState(undefined);
   const [profileReady, setProfileReady] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authReason, setAuthReason] = useState("");
 
   const todayKey = new Date().toDateString();
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -601,26 +756,31 @@ export default function FinanceAIApp() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Load this user's plan and today's usage once logged in
+  // Load plan and usage
   useEffect(() => {
-    if (!session) return;
-    (async () => {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("plan")
-        .eq("id", session.user.id)
-        .single();
-      if (profile) setUserPlan(profile.plan);
+    if (session) {
+      (async () => {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("plan")
+          .eq("id", session.user.id)
+          .single();
+        if (profile) setUserPlan(profile.plan);
 
-      const { data: usageRow } = await supabase
-        .from("usage")
-        .select("count")
-        .eq("user_id", session.user.id)
-        .eq("date", todayISO)
-        .single();
-      setUsage(prev => ({ ...prev, [todayKey]: usageRow?.count || 0 }));
+        const { data: usageRow } = await supabase
+          .from("usage")
+          .select("count")
+          .eq("user_id", session.user.id)
+          .eq("date", todayISO)
+          .single();
+        setUsage(prev => ({ ...prev, [todayKey]: usageRow?.count || 0 }));
+        setProfileReady(true);
+      })();
+    } else {
+      const guestUsage = JSON.parse(localStorage.getItem("airupee_usage") || "{}");
+      setUsage(guestUsage);
       setProfileReady(true);
-    })();
+    }
   }, [session]);
 
   const dailyLimit = userPlan === "free" ? 4 : userPlan === "starter" ? 30 : "Unlimited";
@@ -629,11 +789,16 @@ export default function FinanceAIApp() {
   const recordUsage = async () => {
     const newCount = (usage[todayKey] || 0) + 1;
     setUsage(prev => ({ ...prev, [todayKey]: newCount }));
+
     if (session) {
       await supabase.from("usage").upsert(
         { user_id: session.user.id, date: todayISO, count: newCount },
         { onConflict: "user_id,date" }
       );
+    } else {
+      const guestUsage = JSON.parse(localStorage.getItem("airupee_usage") || "{}");
+      guestUsage[todayKey] = newCount;
+      localStorage.setItem("airupee_usage", JSON.stringify(guestUsage));
     }
   };
 
@@ -655,36 +820,71 @@ export default function FinanceAIApp() {
     }
     if (!activeTool) return null;
     if (!hasAccess(userPlan, activeTool.minPlan)) {
-      return <LockedPanel tool={activeTool} onUpgrade={(p) => updatePlan(p)} />;
+      return <LockedPanel tool={activeTool} onUpgrade={(p) => updatePlan(p)} onLogin={() => { setAuthReason("upgrade"); setShowAuth(true); }} />;
     }
     if (limitReached) {
       return (
         <div style={{ padding: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>⏳</div>
-          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>You've used your {dailyLimit} free queries today</div>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 24, maxWidth: 360 }}>
-            Upgrade to Pro for unlimited access, or grab a ₹49 single-task pack right now.
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            {session ? "You've used your daily limit" : "Free preview limit reached"}
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => updatePlan("pro")} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${C.green}, #059669)`, color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Upgrade to Pro — ₹199/mo →</button>
-            <button onClick={() => updatePlan("payonce")} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.pink}`, background: "transparent", color: C.pink, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Buy 1 task — ₹49</button>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 24, maxWidth: 360 }}>
+            {session 
+              ? "Upgrade to Pro for unlimited access, or grab a ₹49 single-task pack."
+              : "Create a free account to get 4 queries/day and save your history. Or upgrade for unlimited access."}
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            {!session && (
+              <button onClick={() => { setAuthReason("quota"); setShowAuth(true); }} style={{
+                padding: "10px 22px", borderRadius: 10, border: "none",
+                background: `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
+                color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13
+              }}>Create Free Account →</button>
+            )}
+            <button onClick={() => updatePlan("pro")} style={{
+              padding: "10px 22px", borderRadius: 10, border: "none",
+              background: `linear-gradient(135deg, ${C.green}, #059669)`,
+              color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13
+            }}>Upgrade to Pro — ₹199/mo →</button>
+            <button onClick={() => updatePlan("payonce")} style={{
+              padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.pink}`,
+              background: "transparent", color: C.pink, fontWeight: 700, cursor: "pointer", fontSize: 13
+            }}>Buy 1 task — ₹49</button>
           </div>
         </div>
       );
     }
-    return <ToolPanel key={activeTool.id} tool={activeTool} userPlan={userPlan} onUse={recordUsage} session={session} />;
+    return <ToolPanel key={activeTool.id} tool={activeTool} userPlan={userPlan} onUse={recordUsage} session={session} onLogin={() => { setAuthReason("save"); setShowAuth(true); }} />;
   };
 
-  if (session === undefined || (session && !profileReady)) {
+  // Auth Modal Component
+  const AuthModal = () => {
+    if (!showAuth) return null;
+    return (
+      <div style={{
+        position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+        background: "rgba(0,0,0,0.7)", zIndex: 1000,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <div style={{ position: "relative", width: 400 }}>
+          <button onClick={() => setShowAuth(false)} style={{
+            position: "absolute", top: -40, right: 0,
+            background: "transparent", border: "none", color: C.muted,
+            fontSize: 24, cursor: "pointer",
+          }}>✕</button>
+          <Auth onSuccess={() => setShowAuth(false)} />
+        </div>
+      </div>
+    );
+  };
+
+  if (!profileReady) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.muted, fontFamily: "'Inter','DM Sans',system-ui,sans-serif" }}>
         <Spinner label="Loading..." />
       </div>
     );
-  }
-
-  if (!session) {
-    return <Auth />;
   }
 
   return (
@@ -742,11 +942,22 @@ export default function FinanceAIApp() {
             background: active === "pricing" ? `${C.green}22` : "transparent", color: C.greenLight,
             cursor: "pointer", fontSize: 12, fontWeight: 700, marginBottom: 8
           }}>💳 Plans & Pricing</button>
-          <div style={{ fontSize: 10, color: C.dim, textAlign: "center", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user.email}</div>
-          <button onClick={() => supabase.auth.signOut()} style={{
-            width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.border}`,
-            background: "transparent", color: C.muted, cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 8
-          }}>Log out</button>
+
+          {session ? (
+            <>
+              <div style={{ fontSize: 10, color: C.dim, textAlign: "center", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user.email}</div>
+              <button onClick={() => supabase.auth.signOut()} style={{
+                width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.border}`,
+                background: "transparent", color: C.muted, cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 8
+              }}>Log out</button>
+            </>
+          ) : (
+            <button onClick={() => { setAuthReason("login"); setShowAuth(true); }} style={{
+              width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.accent}`,
+              background: "transparent", color: C.accentLight, cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 8
+            }}>Log in / Sign up</button>
+          )}
+
           <div style={{ fontSize: 9, color: C.dim, textAlign: "center" }}>AIRupee.in · v2.0</div>
         </div>
       </div>
@@ -760,19 +971,26 @@ export default function FinanceAIApp() {
             <div style={{ fontSize: 11, color: C.muted }}>{active === "pricing" ? "Compare plans and switch anytime" : activeTool?.desc}</div>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: `${PLANS[userPlan].color}18`, border: `1px solid ${PLANS[userPlan].color}40`, padding: "4px 10px", borderRadius: 16 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: PLANS[userPlan].color }} />
-              <span style={{ fontSize: 11, color: PLANS[userPlan].color, fontWeight: 700 }}>{PLANS[userPlan].name}</span>
-            </div>
+            {!session ? (
+              <GuestBadge userPlan={userPlan} onLogin={() => { setAuthReason("login"); setShowAuth(true); }} />
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, background: `${PLANS[userPlan].color}18`, border: `1px solid ${PLANS[userPlan].color}40`, padding: "4px 10px", borderRadius: 16 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: PLANS[userPlan].color }} />
+                <span style={{ fontSize: 11, color: PLANS[userPlan].color, fontWeight: 700 }}>{PLANS[userPlan].name}</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {active !== "pricing" && <UsageBar userPlan={userPlan} used={usedToday} limit={dailyLimit} />}
+        {active !== "pricing" && <UsageBar userPlan={userPlan} used={usedToday} limit={dailyLimit} isGuest={!session} />}
 
         <div style={{ flex: 1, overflow: "hidden" }}>
           {renderMain()}
         </div>
       </div>
+
+      {/* AUTH MODAL */}
+      <AuthModal />
     </div>
   );
 }
