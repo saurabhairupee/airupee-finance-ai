@@ -61,6 +61,12 @@ const TOOLS = [
     minPlan: "free", modelTier: "light",
   },
   {
+    id: "gst_reco", icon: "🔄", name: "Get Your GST Reconciled", category: "Compliance",
+    desc: "Match Purchase Register vs GSTR-2B, flag ITC risk & vendor issues",
+    minPlan: "starter", modelTier: "heavy",
+    fileSlots: ["Purchase Register", "GSTR-2B"],
+  },
+  {
     id: "ratio", icon: "📐", name: "Get Your Financial Ratios Calculated", category: "Reporting",
     desc: "15+ liquidity, profitability, efficiency & leverage ratios with commentary",
     minPlan: "starter", modelTier: "heavy",
@@ -105,14 +111,14 @@ const hasAccess = (userPlan, toolMinPlan) => planRank[userPlan] >= planRank[tool
 // Pro & Firm (paying for quality) → Claude Sonnet (best reasoning)
 // All calls go through our own /api/gemini serverless proxy — never
 // call Anthropic or Google directly from the browser (CORS + security).
-const callAI = async (prompt, systemPrompt, userPlan, file = null) => {
+const callAI = async (prompt, systemPrompt, userPlan, file = null, files = null) => {
   const useClaude = userPlan === "pro" || userPlan === "firm";
 
   try {
     const response = await fetch("/api/gemini", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, systemPrompt, useClaude, file }),
+      body: JSON.stringify({ prompt, systemPrompt, useClaude, file, files }),
     });
     const data = await response.json();
     return data.text || "Sorry, please try again.";
@@ -175,6 +181,7 @@ function ToolPanel({ tool, userPlan, onUse, session }) {
   const [copied, setCopied] = useState(false);
   const [tone, setTone] = useState("Formal");
   const [file, setFile] = useState(null); // { name, mediaType, data, sizeMB }
+  const [files, setFiles] = useState({}); // { [slotLabel]: { name, mediaType, data, sizeMB } } — for multi-file tools
   const [fileError, setFileError] = useState("");
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
@@ -212,6 +219,19 @@ function ToolPanel({ tool, userPlan, onUse, session }) {
     tax: "You are an expert Indian tax advisor (CA level). Give accurate, practical advice with specific current rates and examples on GST, Income Tax, TDS.",
     email: "You are a senior Finance Manager writing professional business emails. Write clear, concise, effective finance emails with subject line, greeting, body, and sign-off.",
     invoice: "You are an expert AP accountant. Extract invoice data and suggest GL codes precisely for a hospitality/services company.",
+    gst_reco: `You are an expert Indian GST compliance analyst. You will be given two documents: a company's Purchase Register (their own record of purchase invoices) and their GSTR-2B (the auto-populated statement from the GST portal showing what vendors have actually reported).
+
+Your job is to reconcile the two and produce a clear, structured, audit-ready report with these sections:
+
+1. **Summary** — total invoices in each document, how many matched, how many didn't.
+2. **Matched Invoices** — briefly confirm these are clean, no action needed.
+3. **Mismatches** — invoices present in both but with differing amounts, tax values, or dates. Explain each discrepancy plainly.
+4. **Missing from GSTR-2B** — invoices in the Purchase Register that the vendor hasn't reported yet. Flag these as ITC risk — the business cannot claim input tax credit until the vendor files it. Suggest following up with the vendor.
+5. **Missing from Purchase Register** — invoices in GSTR-2B not recorded in the Purchase Register. Flag as a possible missed expense entry or an invoice booked incorrectly.
+6. **Vendor Compliance Notes** — flag any vendor with repeated mismatches or missing filings, since this pattern often indicates an unreliable or non-compliant vendor worth reconsidering.
+7. **Action Items** — a short, concrete checklist of what the finance team should do next.
+
+Be precise with figures, use ₹ for amounts, and keep the tone professional and audit-ready. If the documents provided are incomplete or unclear, say so plainly rather than guessing at figures.`,
     ratio: "You are a financial analyst. Calculate and explain financial ratios (liquidity, profitability, efficiency, leverage) with plain-English commentary and India context where relevant.",
     variance: "You are a CFO writing board-level variance analysis. Be precise, professional and insightful.",
     commentary: "You are a CFO writing professional financial reports for board members and investors. Use formal, confident, authoritative language.",
@@ -225,6 +245,7 @@ function ToolPanel({ tool, userPlan, onUse, session }) {
     tax: "e.g. GST on hotel services, TDS on professional fees...",
     email: "Describe the situation... e.g. Vendor payment is 30 days overdue",
     invoice: "Paste invoice text here...",
+    gst_reco: "Add any extra context (optional) — e.g. specific vendors to focus on, or the GST period covered...",
     ratio: "Paste P&L/Balance Sheet figures... e.g. Revenue: 50,00,000, Net Profit: 8,00,000, Current Assets: 20,00,000, Current Liabilities: 12,00,000",
     variance: "Enter budget vs actual... e.g. Revenue Budget 50,00,000 Actual 46,50,000; Marketing Budget 3,00,000 Actual 4,20,000",
     commentary: "Enter company, period, revenue, expenses, profit, key notes...",
@@ -255,8 +276,31 @@ function ToolPanel({ tool, userPlan, onUse, session }) {
     reader.readAsDataURL(selected);
   };
 
+  const handleMultiFile = (slotLabel, selected) => {
+    setFileError("");
+    if (!selected) return;
+    const sizeMB = selected.size / (1024 * 1024);
+    const allowedTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
+    if (!allowedTypes.includes(selected.type)) {
+      setFileError(`${slotLabel}: please upload a PDF, PNG, JPG, or WEBP file.`);
+      return;
+    }
+    if (sizeMB > MAX_FILE_MB) {
+      setFileError(`${slotLabel}: file is too large — please keep it under ${MAX_FILE_MB}MB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(",")[1];
+      setFiles(prev => ({ ...prev, [slotLabel]: { name: selected.name, mediaType: selected.type, data: base64, sizeMB: sizeMB.toFixed(1) } }));
+    };
+    reader.onerror = () => setFileError(`${slotLabel}: couldn't read that file — please try again.`);
+    reader.readAsDataURL(selected);
+  };
+
   const run = async () => {
-    if ((!input.trim() && !file) || loading) return;
+    const hasMultiFiles = tool.fileSlots && Object.keys(files).length > 0;
+    if ((!input.trim() && !file && !hasMultiFiles) || loading) return;
     setLoading(true);
     onUse();
     setResult("");
@@ -291,6 +335,13 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
         setResult(res);
         saveToHistory(input, res);
       }
+    } else if (tool.fileSlots) {
+      const uploadedSlots = Object.entries(files).map(([label, f]) => ({ label, mediaType: f.mediaType, data: f.data }));
+      const promptText = input.trim() || `Reconcile the attached documents.`;
+      const res = await callAI(promptText, systemPrompts[tool.id], userPlan, null, uploadedSlots);
+      setResult(res);
+      const fileNames = Object.entries(files).map(([label, f]) => `${label}: ${f.name}`).join(", ");
+      saveToHistory(fileNames ? `[${fileNames}] ${input}`.trim() : promptText, res);
     } else {
       const promptText = input.trim() || "Analyze the attached document.";
       const res = await callAI(promptText, systemPrompts[tool.id], userPlan, file);
@@ -386,10 +437,39 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
           {fileError && <div style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{fileError}</div>}
         </div>
       )}
+      {tool.fileSlots && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 11, color: C.muted }}>Upload both documents for reconciliation — PDF, PNG, JPG, or WEBP, up to {MAX_FILE_MB}MB each</div>
+          {tool.fileSlots.map(slot => {
+            const f = files[slot];
+            return (
+              <div key={slot}>
+                <div style={{ fontSize: 11, color: C.text, fontWeight: 700, marginBottom: 6 }}>{slot}</div>
+                <label style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10,
+                  border: `1.5px dashed ${f ? C.green : C.border}`, background: C.card, cursor: "pointer",
+                }}>
+                  <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp"
+                    onChange={e => handleMultiFile(slot, e.target.files?.[0])}
+                    style={{ display: "none" }} />
+                  <span style={{ fontSize: 18 }}>📎</span>
+                  <span style={{ fontSize: 12, color: f ? C.greenLight : C.muted, flex: 1 }}>
+                    {f ? `${f.name} (${f.sizeMB}MB)` : `Click to choose the ${slot} file`}
+                  </span>
+                  {f && (
+                    <span onClick={(e) => { e.preventDefault(); setFiles(prev => { const n = { ...prev }; delete n[slot]; return n; }); }} style={{ fontSize: 12, color: C.red, cursor: "pointer", fontWeight: 700 }}>Remove</span>
+                  )}
+                </label>
+              </div>
+            );
+          })}
+          {fileError && <div style={{ fontSize: 11, color: C.red }}>{fileError}</div>}
+        </div>
+      )}
       <textarea value={input} onChange={e => setInput(e.target.value)} rows={6}
         placeholder={placeholders[tool.id]}
         style={{ width: "100%", padding: 14, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 13, resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: tool.id === "invoice" || tool.id === "fraud" || tool.id === "contract" ? "monospace" : "inherit" }} />
-      <button onClick={run} disabled={loading || (!input.trim() && !file)} style={{
+      <button onClick={run} disabled={loading || (!input.trim() && !file && !(tool.fileSlots && Object.keys(files).length > 0))} style={{
         padding: "12px 24px", borderRadius: 10, border: "none",
         background: loading ? C.dim : `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
         color: "white", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontSize: 14
