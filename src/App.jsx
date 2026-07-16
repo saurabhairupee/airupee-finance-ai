@@ -167,7 +167,7 @@ const UsageBar = ({ userPlan, used, limit }) => {
 };
 
 // ── GENERIC TOOL PANEL ────────────────────────────────────────
-function ToolPanel({ tool, userPlan, onUse }) {
+function ToolPanel({ tool, userPlan, onUse, session }) {
   const [input, setInput] = useState("");
   const [result, setResult] = useState("");
   const [variants, setVariants] = useState(null);
@@ -177,8 +177,35 @@ function ToolPanel({ tool, userPlan, onUse }) {
   const [file, setFile] = useState(null); // { name, mediaType, data, sizeMB }
   const [fileError, setFileError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   const TONES = ["Formal", "Casual", "Friendly", "Urgent", "Firm"];
+
+  // Load this user's last 10 Q&A for this specific tool
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      const { data } = await supabase
+        .from("chat_history")
+        .select("id, input, output, created_at")
+        .eq("user_id", session.user.id)
+        .eq("tool_id", tool.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      setHistory(data || []);
+    })();
+  }, [session, tool.id]);
+
+  const saveToHistory = async (savedInput, savedOutput) => {
+    if (!session) return;
+    const { data } = await supabase
+      .from("chat_history")
+      .insert({ user_id: session.user.id, tool_id: tool.id, input: savedInput, output: savedOutput })
+      .select("id, input, output, created_at")
+      .single();
+    if (data) setHistory(prev => [data, ...prev].slice(0, 10));
+  };
 
   const systemPrompts = {
     chat: "You are an expert Finance AI assistant specializing in Indian finance, accounting, IFRS, and corporate finance. Give precise, practical, professional answers. Use ₹ for Indian Rupee.",
@@ -253,18 +280,22 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
         if (parsed.variants && Array.isArray(parsed.variants) && parsed.variants.length > 0) {
           setVariants(parsed.variants);
           setActiveVariant(0);
+          saveToHistory(input, JSON.stringify(parsed.variants));
         } else {
           setResult(res);
+          saveToHistory(input, res);
         }
       } catch {
         // Model didn't return clean JSON — just show the raw text so the
         // user still gets a usable draft instead of a blank result.
         setResult(res);
+        saveToHistory(input, res);
       }
     } else {
       const promptText = input.trim() || "Analyze the attached document.";
       const res = await callAI(promptText, systemPrompts[tool.id], userPlan, file);
       setResult(res);
+      saveToHistory(file ? `[File: ${file.name}] ${input}`.trim() : promptText, res);
     }
     setLoading(false);
   };
@@ -284,8 +315,41 @@ The FIRST variant must be written strictly in the "${tone}" tone the user asked 
     <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14, height: "100%", overflowY: "auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 11, color: C.muted }}>Powered by <strong style={{ color: C.accentLight }}>{PLANS[userPlan]?.model}</strong></span>
-        <span style={{ fontSize: 10, background: `${C.purple}22`, color: C.purple, padding: "3px 10px", borderRadius: 10 }}>{tool.category}</span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {history.length > 0 && (
+            <button onClick={() => setShowHistory(s => !s)} style={{
+              fontSize: 10, background: showHistory ? `${C.accent}33` : "transparent",
+              border: `1px solid ${C.border}`, color: C.muted, padding: "3px 10px",
+              borderRadius: 10, cursor: "pointer", fontWeight: 700,
+            }}>🕘 Recent ({history.length})</button>
+          )}
+          <span style={{ fontSize: 10, background: `${C.purple}22`, color: C.purple, padding: "3px 10px", borderRadius: 10 }}>{tool.category}</span>
+        </div>
       </div>
+
+      {showHistory && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10 }}>
+          {history.map(h => (
+            <div key={h.id} onClick={() => {
+              setInput(h.input || "");
+              setShowHistory(false);
+              try {
+                const parsed = JSON.parse(h.output);
+                if (Array.isArray(parsed)) { setVariants(parsed); setActiveVariant(0); setResult(""); return; }
+              } catch { /* not JSON, treat as plain text */ }
+              setVariants(null);
+              setResult(h.output || "");
+            }} style={{
+              padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontSize: 11.5,
+              background: C.card, border: `1px solid ${C.border}`,
+            }}>
+              <div style={{ color: C.text, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.input || "(no input)"}</div>
+              <div style={{ color: C.dim, fontSize: 10, marginTop: 2 }}>{new Date(h.created_at).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {tool.id === "email" && (
         <div>
           <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Choose a tone</div>
@@ -528,7 +592,7 @@ export default function FinanceAIApp() {
         </div>
       );
     }
-    return <ToolPanel key={activeTool.id} tool={activeTool} userPlan={userPlan} onUse={recordUsage} />;
+    return <ToolPanel key={activeTool.id} tool={activeTool} userPlan={userPlan} onUse={recordUsage} session={session} />;
   };
 
   if (session === undefined || (session && !profileReady)) {
