@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "./supabaseClient";
+import Auth from "./Auth";
 
 const C = {
   bg: "#060d1f",
@@ -435,13 +437,67 @@ export default function FinanceAIApp() {
   const [active, setActive] = useState("chat");
   const [userPlan, setUserPlan] = useState("free");
   const [usage, setUsage] = useState({});
+  const [session, setSession] = useState(undefined); // undefined = checking, null = logged out
+  const [profileReady, setProfileReady] = useState(false);
 
   const todayKey = new Date().toDateString();
-  const usedToday = usage[todayKey] || 0;
-  const dailyLimit = userPlan === "free" ? 2 : userPlan === "starter" ? 30 : "Unlimited";
+  const todayISO = new Date().toISOString().slice(0, 10);
 
-  const recordUsage = () => {
-    setUsage(prev => ({ ...prev, [todayKey]: (prev[todayKey] || 0) + 1 }));
+  // Watch auth state
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      if (!newSession) {
+        setUserPlan("free");
+        setUsage({});
+        setProfileReady(false);
+      }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // Load this user's plan and today's usage once logged in
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("plan")
+        .eq("id", session.user.id)
+        .single();
+      if (profile) setUserPlan(profile.plan);
+
+      const { data: usageRow } = await supabase
+        .from("usage")
+        .select("count")
+        .eq("user_id", session.user.id)
+        .eq("date", todayISO)
+        .single();
+      setUsage(prev => ({ ...prev, [todayKey]: usageRow?.count || 0 }));
+      setProfileReady(true);
+    })();
+  }, [session]);
+
+  const dailyLimit = userPlan === "free" ? 4 : userPlan === "starter" ? 30 : "Unlimited";
+  const usedToday = usage[todayKey] || 0;
+
+  const recordUsage = async () => {
+    const newCount = (usage[todayKey] || 0) + 1;
+    setUsage(prev => ({ ...prev, [todayKey]: newCount }));
+    if (session) {
+      await supabase.from("usage").upsert(
+        { user_id: session.user.id, date: todayISO, count: newCount },
+        { onConflict: "user_id,date" }
+      );
+    }
+  };
+
+  const updatePlan = async (p) => {
+    setUserPlan(p);
+    if (session) {
+      await supabase.from("profiles").update({ plan: p }).eq("id", session.user.id);
+    }
   };
 
   const limitReached = dailyLimit !== "Unlimited" && usedToday >= dailyLimit;
@@ -451,11 +507,11 @@ export default function FinanceAIApp() {
 
   const renderMain = () => {
     if (active === "pricing") {
-      return <PricingView userPlan={userPlan} onSelectPlan={(p) => { setUserPlan(p); }} />;
+      return <PricingView userPlan={userPlan} onSelectPlan={(p) => { updatePlan(p); }} />;
     }
     if (!activeTool) return null;
     if (!hasAccess(userPlan, activeTool.minPlan)) {
-      return <LockedPanel tool={activeTool} onUpgrade={(p) => setUserPlan(p)} />;
+      return <LockedPanel tool={activeTool} onUpgrade={(p) => updatePlan(p)} />;
     }
     if (limitReached) {
       return (
@@ -466,14 +522,26 @@ export default function FinanceAIApp() {
             Upgrade to Pro for unlimited access, or grab a ₹49 single-task pack right now.
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => setUserPlan("pro")} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${C.green}, #059669)`, color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Upgrade to Pro — ₹199/mo →</button>
-            <button onClick={() => setUserPlan("payonce")} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.pink}`, background: "transparent", color: C.pink, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Buy 1 task — ₹49</button>
+            <button onClick={() => updatePlan("pro")} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${C.green}, #059669)`, color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Upgrade to Pro — ₹199/mo →</button>
+            <button onClick={() => updatePlan("payonce")} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.pink}`, background: "transparent", color: C.pink, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Buy 1 task — ₹49</button>
           </div>
         </div>
       );
     }
     return <ToolPanel tool={activeTool} userPlan={userPlan} onUse={recordUsage} />;
   };
+
+  if (session === undefined || (session && !profileReady)) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.muted, fontFamily: "'Inter','DM Sans',system-ui,sans-serif" }}>
+        <Spinner label="Loading..." />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Auth />;
+  }
 
   return (
     <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter','DM Sans',system-ui,sans-serif", overflow: "hidden" }}>
@@ -530,6 +598,11 @@ export default function FinanceAIApp() {
             background: active === "pricing" ? `${C.green}22` : "transparent", color: C.greenLight,
             cursor: "pointer", fontSize: 12, fontWeight: 700, marginBottom: 8
           }}>💳 Plans & Pricing</button>
+          <div style={{ fontSize: 10, color: C.dim, textAlign: "center", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user.email}</div>
+          <button onClick={() => supabase.auth.signOut()} style={{
+            width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.border}`,
+            background: "transparent", color: C.muted, cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 8
+          }}>Log out</button>
           <div style={{ fontSize: 9, color: C.dim, textAlign: "center" }}>AIRupee.in · v2.0</div>
         </div>
       </div>
