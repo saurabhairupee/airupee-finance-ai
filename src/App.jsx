@@ -775,3 +775,4 @@ export default function FinanceAIApp() {
       </div>
     </div>
   );
+}
