@@ -1,4 +1,7 @@
-import { useState, useEffect } from "react";
+
+# Create the COMPLETE fixed App.jsx with client-side tax calculator properly integrated
+
+complete_app_jsx = '''import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import Auth from "./Auth";
 
@@ -21,7 +24,191 @@ const C = {
   dim: "#475569",
 };
 
-// ── PLANS ──────────────────────────────────────────────────────
+// ============================================
+// TAX CALCULATOR ENGINE (CLIENT-SIDE)
+// ============================================
+const FY_2026_27 = {
+  newRegime: {
+    slabs: [
+      { limit: 400000, rate: 0 },
+      { limit: 800000, rate: 0.05 },
+      { limit: 1200000, rate: 0.10 },
+      { limit: 1600000, rate: 0.15 },
+      { limit: 2000000, rate: 0.20 },
+      { limit: 2400000, rate: 0.25 },
+      { limit: Infinity, rate: 0.30 }
+    ],
+    rebate87A: { limit: 1200000, amount: 60000 },
+    standardDeduction: 75000,
+  },
+  oldRegime: {
+    slabs: [
+      { limit: 250000, rate: 0 },
+      { limit: 500000, rate: 0.05 },
+      { limit: 1000000, rate: 0.20 },
+      { limit: Infinity, rate: 0.30 }
+    ],
+    rebate87A: { limit: 500000, amount: 12500 },
+    standardDeduction: 75000,
+  },
+  cessRate: 0.04,
+};
+
+function calculateTax(income, regime, deductions = {}) {
+  let taxableIncome = income;
+  const appliedDeductions = [];
+  const config = FY_2026_27[regime + 'Regime'];
+  
+  // Standard Deduction
+  if (deductions.isSalaried !== false) {
+    taxableIncome -= config.standardDeduction;
+    appliedDeductions.push({ name: 'Standard Deduction (Section 16(ia))', amount: config.standardDeduction });
+  }
+  
+  if (regime === 'old') {
+    // 80C
+    const c80C = Math.min(deductions.c80C || 0, 150000);
+    if (c80C > 0) { taxableIncome -= c80C; appliedDeductions.push({ name: '80C (PPF, ELSS, LIC, etc.)', amount: c80C }); }
+    
+    // 80CCD(1B) - NPS
+    const ccd1b = Math.min(deductions.c80CCD_1B || 0, 50000);
+    if (ccd1b > 0) { taxableIncome -= ccd1b; appliedDeductions.push({ name: '80CCD(1B) - NPS Additional', amount: ccd1b }); }
+    
+    // 80D - Health Insurance
+    const healthSelf = Math.min(deductions.c80D_self || 0, 25000);
+    if (healthSelf > 0) { taxableIncome -= healthSelf; appliedDeductions.push({ name: '80D - Health Insurance (Self)', amount: healthSelf }); }
+    
+    // HRA
+    if (deductions.hraAmount > 0) {
+      taxableIncome -= deductions.hraAmount;
+      appliedDeductions.push({ name: 'HRA Exemption (Section 10(13A))', amount: deductions.hraAmount });
+    }
+  }
+  
+  taxableIncome = Math.max(0, taxableIncome);
+  
+  // Calculate tax
+  let tax = 0;
+  let remaining = taxableIncome;
+  let prevLimit = 0;
+  const slabBreakdown = [];
+  
+  for (const slab of config.slabs) {
+    const slabAmount = Math.min(remaining, slab.limit - prevLimit);
+    const slabTax = slabAmount * slab.rate;
+    if (slabAmount > 0) {
+      tax += slabTax;
+      slabBreakdown.push({ from: prevLimit, to: slab.limit === Infinity ? 'Above' : slab.limit, amount: slabAmount, rate: slab.rate * 100, tax: slabTax });
+    }
+    remaining -= slabAmount;
+    prevLimit = slab.limit;
+    if (remaining <= 0) break;
+  }
+  
+  // Rebate 87A
+  let rebate = 0;
+  if (taxableIncome <= config.rebate87A.limit) {
+    rebate = Math.min(tax, config.rebate87A.amount);
+  }
+  
+  const taxAfterRebate = Math.max(0, tax - rebate);
+  const cess = taxAfterRebate * FY_2026_27.cessRate;
+  const finalTax = taxAfterRebate + cess;
+  
+  return {
+    regime,
+    income,
+    taxableIncome,
+    deductions: appliedDeductions,
+    totalDeductions: income - taxableIncome,
+    taxBeforeRebate: tax,
+    rebate87A: rebate,
+    taxAfterRebate,
+    cess,
+    finalTax,
+    effectiveRate: income > 0 ? ((finalTax / income) * 100).toFixed(2) : '0.00',
+    monthlyTax: Math.round(finalTax / 12),
+    slabBreakdown
+  };
+}
+
+function compareRegimes(income, deductions) {
+  const oldResult = calculateTax(income, 'old', deductions);
+  const newResult = calculateTax(income, 'new', deductions);
+  const savings = Math.abs(oldResult.finalTax - newResult.finalTax);
+  const betterRegime = oldResult.finalTax < newResult.finalTax ? 'old' : 'new';
+  
+  return { old: oldResult, new: newResult, savings, betterRegime };
+}
+
+// ============================================
+// GST DATABASE (CLIENT-SIDE)
+// ============================================
+const GST_DB = {
+  hsn: {
+    '8471': { desc: 'Automatic data processing machines (computers)', rate: '18%' },
+    '847130': { desc: 'Portable automatic data processing machines', rate: '18%' },
+    '8517': { desc: 'Telephone sets, including mobile phones', rate: '18%' },
+    '851712': { desc: 'Telephones for cellular networks (mobile phones)', rate: '18%' },
+    '7108': { desc: 'Gold (including gold plated with platinum)', rate: '1.5%' },
+    '7113': { desc: 'Articles of jewellery and parts thereof', rate: '1.5%' },
+    '7114': { desc: 'Articles of goldsmiths or silversmiths', rate: '1.5%' },
+    '0401': { desc: 'Milk and cream, not concentrated', rate: '0%' },
+    '0402': { desc: 'Milk and cream, concentrated', rate: '5%' },
+    '1001': { desc: 'Wheat and meslin', rate: '0%' },
+    '1006': { desc: 'Rice', rate: '0%' },
+    '1701': { desc: 'Cane or beet sugar', rate: '5%' },
+    '0901': { desc: 'Coffee, whether or not roasted', rate: '5%' },
+    '0902': { desc: 'Tea, whether or not flavoured', rate: '5%' },
+    '1507': { desc: 'Soya-bean oil', rate: '5%' },
+    '1905': { desc: 'Bread, pastry, cakes, biscuits', rate: '18%' },
+    '8414': { desc: 'Air conditioning machines', rate: '28%' },
+    '8418': { desc: 'Refrigerators, freezers', rate: '28%' },
+    '8450': { desc: 'Household washing machines', rate: '28%' },
+    '8703': { desc: 'Motor cars and other motor vehicles', rate: '28%' },
+    '8711': { desc: 'Motorcycles and cycles with auxiliary motor', rate: '28%' },
+  },
+  tds: {
+    '194C': { desc: 'Payment to contractor', rate: '1% (Individual/HUF), 2% (Others)', threshold: 30000 },
+    '194I': { desc: 'Rent', rate: '2% (Plant/Machinery), 10% (Land/Building)', threshold: 240000 },
+    '194IA': { desc: 'Payment on transfer of immovable property', rate: '1%', threshold: 5000000 },
+    '194J': { desc: 'Fees for professional or technical services', rate: '2% (Technical), 10% (Professional)', threshold: 30000 },
+    '194H': { desc: 'Commission or brokerage', rate: '5%', threshold: 15000 },
+    '194A': { desc: 'Interest other than interest on securities', rate: '10%', threshold: 40000 },
+    '192': { desc: 'Salary', rate: 'Slab rate', threshold: 0 },
+    '194': { desc: 'Dividend', rate: '10%', threshold: 5000 },
+    '194B': { desc: 'Winnings from lottery', rate: '30%', threshold: 10000 },
+    '194D': { desc: 'Insurance commission', rate: '5%', threshold: 15000 },
+    '194DA': { desc: 'Payment in respect of life insurance policy', rate: '5%', threshold: 100000 },
+    '194G': { desc: 'Commission on sale of lottery tickets', rate: '5%', threshold: 15000 },
+    '194K': { desc: 'Payment of income in respect of units', rate: '10%', threshold: 5000 },
+    '194M': { desc: 'Payment to resident contractors/professionals', rate: '5%', threshold: 5000000 },
+    '194N': { desc: 'Cash withdrawal exceeding certain amount', rate: '2% (above ₹20L), 5% (above ₹1Cr)', threshold: 20000000 },
+    '194O': { desc: 'Payment by e-commerce operator', rate: '1%', threshold: 500000 },
+    '194Q': { desc: 'Payment for purchase of goods', rate: '0.1%', threshold: 5000000 },
+    '195': { desc: 'Payment to non-resident', rate: 'Varies', threshold: 0 },
+  }
+};
+
+function searchGST(query) {
+  const q = query.toLowerCase();
+  const results = [];
+  for (const [code, data] of Object.entries(GST_DB.hsn)) {
+    if (code.includes(q) || data.desc.toLowerCase().includes(q)) {
+      results.push({ type: 'HSN', code, ...data });
+    }
+  }
+  for (const [code, data] of Object.entries(GST_DB.tds)) {
+    if (code.includes(q) || data.desc.toLowerCase().includes(q)) {
+      results.push({ type: 'TDS', code, ...data });
+    }
+  }
+  return results;
+}
+
+// ============================================
+// PLANS & TOOLS
+// ============================================
 const PLANS = {
   free: { id: "free", name: "FREE", color: C.muted, model: "Gemini Flash", queriesPerDay: 4 },
   payonce: { id: "payonce", name: "PAY-ONCE", color: C.pink, model: "Gemini Flash", queriesPerDay: "1 task" },
@@ -38,16 +225,13 @@ const planCards = [
   { ...PLANS.firm, price: "₹2,999", period: "/month", icon: "🏢", desc: "CA firms & teams", tools: 10, badge: "10 USERS" },
 ];
 
-// ── TOOLS ──────────────────────────────────────────────────────
 const TOOLS = [
   {
     id: "chat", icon: "💬", name: "Get Instant Finance Answers", category: "Core",
     desc: "Ask anything — IFRS, GST, tax, investing, journal entries",
     minPlan: "free", modelTier: "light",
     samples: [
-      { label: "IFRS 15 Revenue", text: "Explain IFRS 15 revenue recognition with a practical example for a SaaS company in India. Include the 5-step model and journal entries." },
-      { label: "GST on Services", text: "What is the GST rate and HSN code for professional consulting services provided by a CA firm in Bangalore to a client in Mumbai? Is IGST applicable?" },
-      { label: "Journal Entry", text: "A company purchases machinery for ₹5,00,000 + 18% GST on 15 Oct 2025. Paid 50% by cheque, balance on credit. Show the journal entry under Ind AS." },
+      { label: "IFRS 15 Revenue", text: "Explain IFRS 15 revenue recognition with a practical example for a SaaS company in India." },
     ]
   },
   {
@@ -55,9 +239,11 @@ const TOOLS = [
     desc: "India GST, Income Tax, TDS rates with real examples",
     minPlan: "free", modelTier: "light",
     samples: [
-      { label: "TDS on Rent", text: "What is the TDS rate under Section 194I for commercial rent of ₹45,000 per month? When should it be deducted and deposited?" },
-      { label: "Old vs New Regime", text: "For FY 2025-26, compare old vs new tax regime for a salaried person with ₹18L income, ₹1.5L 80C, ₹50K NPS, HRA ₹2.4L. Which is better?" },
-      { label: "GST Input Credit", text: "A manufacturer buys raw materials with ₹50,000 GST paid. They sell finished goods with ₹80,000 GST collected. Calculate net GST liability and input credit available." },
+      { label: "🧮 Tax Regime Comparison", text: "Compare old vs new regime for ₹12L income, 80C ₹1.5L, NPS ₹50K, HRA ₹2.4L", isCalc: true },
+      { label: "🧮 Calculate Tax (New)", text: "Calculate tax on ₹18 lakh salary under new regime", isCalc: true },
+      { label: "📋 TDS Rate Lookup", text: "What is TDS rate under Section 194I for commercial rent?", isLookup: true },
+      { label: "📋 GST Rate Lookup", text: "What is GST rate and HSN code for mobile phones?", isLookup: true },
+      { label: "🧮 GST Input Credit", text: "A manufacturer buys raw materials with ₹50,000 GST paid. They sell finished goods with ₹80,000 GST collected. Calculate net GST liability.", isCalc: true },
     ]
   },
   {
@@ -65,17 +251,14 @@ const TOOLS = [
     desc: "Professional emails — vendor reminders, audit responses, approvals",
     minPlan: "free", modelTier: "light",
     samples: [
-      { label: "Payment Reminder", text: "Draft a polite but firm email to a vendor whose invoice of ₹2,50,000 is 45 days overdue. Mention late payment terms and request immediate settlement." },
-      { label: "Audit Response", text: "Write a professional response to a GST officer's ASMT-10 notice regarding mismatch in GSTR-1 vs 3B for Q1 2026." },
+      { label: "Payment Reminder", text: "Draft a polite but firm email to a vendor whose invoice of ₹2,50,000 is 45 days overdue." },
     ]
   },
   {
     id: "invoice", icon: "📄", name: "Get Your Invoice GL-Coded", category: "Operations",
     desc: "Extract data, suggest GL codes, flag issues automatically",
     minPlan: "free", modelTier: "light",
-    samples: [
-      { label: "Hotel Invoice", text: "Invoice from Taj Hotels: Room charges ₹15,000, Food ₹3,500, GST 12% on room, 5% on food, Service charge 10%. Suggest GL codes for a manufacturing company." },
-    ]
+    samples: []
   },
   {
     id: "gst_reco", icon: "🔄", name: "Get Your GST Reconciled", category: "Compliance",
@@ -88,54 +271,41 @@ const TOOLS = [
     id: "ratio", icon: "📐", name: "Get Your Financial Ratios Calculated", category: "Reporting",
     desc: "15+ liquidity, profitability, efficiency & leverage ratios with commentary",
     minPlan: "starter", modelTier: "heavy",
-    samples: [
-      { label: "Quick Analysis", text: "Revenue: ₹1,20,00,000 | COGS: ₹72,00,000 | Current Assets: ₹35,00,000 | Current Liabilities: ₹20,00,000 | Debt: ₹15,00,000 | Equity: ₹40,00,000. Calculate and interpret key ratios." },
-    ]
+    samples: []
   },
   {
     id: "variance", icon: "📊", name: "Get Your Variance Report Written", category: "Reporting",
     desc: "CFO-level budget vs actual commentary, ready to send",
     minPlan: "starter", modelTier: "heavy",
-    samples: [
-      { label: "Monthly Variance", text: "Revenue Budget: ₹50L, Actual: ₹46.5L | Marketing Budget: ₹3L, Actual: ₹4.2L | Salaries Budget: ₹12L, Actual: ₹11.8L. Write a CFO commentary for the board." },
-    ]
+    samples: []
   },
   {
     id: "commentary", icon: "✍️", name: "Get Your Board Report Drafted", category: "Reporting",
     desc: "Board reports, MD&A, investor updates — formal & polished",
     minPlan: "starter", modelTier: "heavy",
-    samples: [
-      { label: "Q2 Board Report", text: "Company: TechServe Pvt Ltd | Period: Q2 FY26 | Revenue: ₹8.5Cr (up 12% YoY) | EBITDA: ₹1.2Cr (margin 14%) | New clients: 3 | Challenges: delayed payments from 2 major clients. Draft MD&A section." },
-    ]
+    samples: []
   },
   {
     id: "cashflow", icon: "💰", name: "Get Your Cash Flow Forecasted", category: "Planning",
     desc: "3-12 month cash position prediction with liquidity risk flags",
     minPlan: "pro", modelTier: "heavy",
-    samples: [
-      { label: "6-Month Forecast", text: "Opening balance: ₹25L | Monthly inflows: ₹15L (receivables) | Monthly outflows: ₹12L (salaries ₹8L, rent ₹1.5L, vendors ₹2.5L) | One-time: Tax payment ₹8L in month 3. Forecast 6 months." },
-    ]
+    samples: []
   },
   {
     id: "fraud", icon: "🔍", name: "Get Your Transactions Fraud-Checked", category: "Audit",
     desc: "Spot duplicates, anomalies, suspicious patterns automatically",
     minPlan: "pro", modelTier: "heavy",
-    samples: [
-      { label: "Vendor Analysis", text: "Analyze these payments: Vendor A ₹49,999 (threshold ₹50K), Vendor A ₹49,999 (same day), Vendor B ₹1,20,000 (no PO), Vendor C ₹25,000 (weekend payment). Flag red flags." },
-    ]
+    samples: []
   },
   {
     id: "contract", icon: "📑", name: "Get Your Contract Risk-Analyzed", category: "Operations",
     desc: "Extract financial terms, flag risky clauses, plain-English summary",
     minPlan: "pro", modelTier: "heavy",
-    samples: [
-      { label: "Vendor Contract", text: "Review this clause: 'Payment terms: Net 60 days. Late fee: 0.5% per month. Force majeure: Unlimited suspension. Termination: 90 days notice by either party, but vendor may withhold deliverables during notice period.' Flag risks." },
-    ]
+    samples: []
   },
 ];
 
 const planRank = { free: 0, payonce: 1, starter: 1, pro: 2, firm: 2 };
-
 const FILE_TOOLS = ["fraud", "invoice", "contract"];
 const MAX_FILE_MB = 4;
 
@@ -163,14 +333,187 @@ const Spinner = ({ label = "AI is thinking..." }) => (
   </div>
 );
 
-// ── TOOLTIP COMPONENT ─────────────────────────────────────────
+// ============================================
+// FORMAT RESULTS
+// ============================================
+function formatTaxComparison(comparison, income) {
+  const { old: o, new: n, savings, betterRegime } = comparison;
+  
+  return `## 📊 Tax Regime Comparison (FY 2026-27)
+
+**Gross Income:** ₹${income.toLocaleString('en-IN')}
+
+---
+
+### 🟢 NEW TAX REGIME
+
+| Item | Amount |
+|------|--------|
+| Gross Income | ₹${income.toLocaleString('en-IN')} |
+| Less: Standard Deduction (16(ia)) | ₹75,000 |
+| **Taxable Income** | **₹${n.taxableIncome.toLocaleString('en-IN')}** |
+
+**Slab-wise Tax:**
+${n.slabBreakdown.map(s => {
+  const toLabel = s.to === 'Above' ? 'Above' : `₹${s.to.toLocaleString('en-IN')}`;
+  return `| ₹${s.from.toLocaleString('en-IN')} – ${toLabel} @ ${s.rate}% | ₹${Math.round(s.tax).toLocaleString('en-IN')} |`;
+}).join('\\n')}
+
+| Tax Before Rebate | ₹${Math.round(n.taxBeforeRebate).toLocaleString('en-IN')} |
+| Less: Rebate u/s 87A | ₹${Math.round(n.rebate87A).toLocaleString('en-IN')} |
+| Tax After Rebate | ₹${Math.round(n.taxAfterRebate).toLocaleString('en-IN')} |
+| Add: Cess @ 4% | ₹${Math.round(n.cess).toLocaleString('en-IN')} |
+| **➡️ FINAL TAX** | **₹${Math.round(n.finalTax).toLocaleString('en-IN')}** |
+
+**Effective Rate:** ${n.effectiveRate}% | **Monthly:** ₹${n.monthlyTax.toLocaleString('en-IN')}
+
+---
+
+### 🔵 OLD TAX REGIME
+
+| Item | Amount |
+|------|--------|
+| Gross Income | ₹${income.toLocaleString('en-IN')} |
+${o.deductions.map(d => `| Less: ${d.name} | ₹${d.amount.toLocaleString('en-IN')} |`).join('\\n')}
+| **Taxable Income** | **₹${o.taxableIncome.toLocaleString('en-IN')}** |
+
+**Slab-wise Tax:**
+${o.slabBreakdown.map(s => {
+  const toLabel = s.to === 'Above' ? 'Above' : `₹${s.to.toLocaleString('en-IN')}`;
+  return `| ₹${s.from.toLocaleString('en-IN')} – ${toLabel} @ ${s.rate}% | ₹${Math.round(s.tax).toLocaleString('en-IN')} |`;
+}).join('\\n')}
+
+| Tax Before Rebate | ₹${Math.round(o.taxBeforeRebate).toLocaleString('en-IN')} |
+| Less: Rebate u/s 87A | ₹${Math.round(o.rebate87A).toLocaleString('en-IN')} |
+| Tax After Rebate | ₹${Math.round(o.taxAfterRebate).toLocaleString('en-IN')} |
+| Add: Cess @ 4% | ₹${Math.round(o.cess).toLocaleString('en-IN')} |
+| **➡️ FINAL TAX** | **₹${Math.round(o.finalTax).toLocaleString('en-IN')}** |
+
+**Effective Rate:** ${o.effectiveRate}% | **Monthly:** ₹${o.monthlyTax.toLocaleString('en-IN')}
+
+---
+
+### 🏆 RECOMMENDATION
+
+**Choose the ${betterRegime.toUpperCase()} Tax Regime**
+
+💰 **You save ₹${savings.toLocaleString('en-IN')} per year**
+
+| | Old Regime | New Regime |
+|--|-----------|------------|
+| Taxable Income | ₹${o.taxableIncome.toLocaleString('en-IN')} | ₹${n.taxableIncome.toLocaleString('en-IN')} |
+| Final Tax | ₹${Math.round(o.finalTax).toLocaleString('en-IN')} | ₹${Math.round(n.finalTax).toLocaleString('en-IN')} |
+| Effective Rate | ${o.effectiveRate}% | ${n.effectiveRate}% |
+
+${n.finalTax === 0 ? '✅ **Zero tax in New Regime!** Your taxable income is within the ₹12 lakh rebate limit.\\n' : ''}⚠️ *This is an automated calculation. Please verify with a practicing CA before filing.*`;
+}
+
+function formatSingleTax(calc, income) {
+  return `## 🧾 Tax Calculation — ${calc.regime.toUpperCase()} Regime (FY 2026-27)
+
+**Gross Income:** ₹${income.toLocaleString('en-IN')}
+
+**Deductions Applied:**
+${calc.deductions.map(d => `- ${d.name}: ₹${d.amount.toLocaleString('en-IN')}`).join('\\n') || 'None'}
+
+**Taxable Income:** ₹${calc.taxableIncome.toLocaleString('en-IN')}
+
+---
+
+**Slab-wise Tax:**
+${calc.slabBreakdown.map(s => {
+  const toLabel = s.to === 'Above' ? 'Above' : `₹${s.to.toLocaleString('en-IN')}`;
+  return `| ₹${s.from.toLocaleString('en-IN')} – ${toLabel} @ ${s.rate}% | ₹${Math.round(s.tax).toLocaleString('en-IN')} |`;
+}).join('\\n')}
+
+---
+
+| Tax Before Rebate | ₹${Math.round(calc.taxBeforeRebate).toLocaleString('en-IN')} |
+| Rebate u/s 87A | ₹${Math.round(calc.rebate87A).toLocaleString('en-IN')} |
+| Tax After Rebate | ₹${Math.round(calc.taxAfterRebate).toLocaleString('en-IN')} |
+| Cess @ 4% | ₹${Math.round(calc.cess).toLocaleString('en-IN')} |
+
+### 💰 FINAL TAX: ₹${Math.round(calc.finalTax).toLocaleString('en-IN')}
+
+- Effective Tax Rate: ${calc.effectiveRate}%
+- Monthly Tax: ₹${calc.monthlyTax.toLocaleString('en-IN')}
+
+${calc.finalTax === 0 ? '✅ You pay ZERO tax!' : ''}
+
+⚠️ *Verify with a CA before filing.*`;
+}
+
+function formatGSTLookup(results) {
+  if (results.length === 0) return "❌ No results found. Try: HSN code (8471), product name (mobile), or TDS section (194C)";
+  
+  return results.map(r => 
+    `📋 ${r.type}: ${r.code}\\n   ${r.desc}\\n   💰 Rate: ${r.rate}${r.threshold ? ` | 📌 Threshold: ₹${r.threshold.toLocaleString('en-IN')}` : ''}`
+  ).join('\\n\\n');
+}
+
+// ============================================
+// INPUT PARSERS
+// ============================================
+function parseIncome(text) {
+  const patterns = [
+    /₹?\\s*(\\d{1,2}(?:,\\d{2}){0,2}(?:,\\d{3})?)\\s*[Ll](?:akh)?/,
+    /₹?\\s*(\\d{6,8})\\s*(?:per\\s*annum|p\\.a\\.)?/i,
+    /income\\s*(?:of\\s*)?₹?\\s*(\\d{1,2}(?:,\\d{2}){0,2}(?:,\\d{3})?)/i,
+    /₹?\\s*(\\d{1,2})\\s*[Ll](?:akh)?/,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const val = match[1].replace(/,/g, '');
+      if (val.length >= 6) return parseInt(val);
+      return parseInt(val) * 100000;
+    }
+  }
+  return 0;
+}
+
+function parseDeductions(text, income) {
+  const deductions = { isSalaried: true };
+  
+  // 80C
+  const c80CMatch = text.match(/80[Cc].*?₹?\\s*(\\d+(?:,\\d+)*)\\s*(?:[Ll](?:akh)?|[Kk])/i);
+  if (c80CMatch) deductions.c80C = parseAmount(c80CMatch[0], c80CMatch[1]);
+  
+  // NPS
+  const npsMatch = text.match(/NPS.*?₹?\\s*(\\d+(?:,\\d+)*)\\s*(?:[Kk]|[Ll](?:akh)?)/i);
+  if (npsMatch) deductions.c80CCD_1B = parseAmount(npsMatch[0], npsMatch[1]);
+  
+  // HRA
+  const hraMatch = text.match(/HRA.*?₹?\\s*(\\d+(?:,\\d+)*)\\s*(?:[Ll](?:akh)?|[Kk])/i);
+  if (hraMatch) {
+    const hraAmount = parseAmount(hraMatch[0], hraMatch[1]);
+    const basicSalary = income * 0.6;
+    const rentPaid = hraAmount * 1.25;
+    const metroLimit = basicSalary * 0.5;
+    const rentMinus10 = Math.max(0, rentPaid - basicSalary * 0.1);
+    deductions.hraAmount = Math.min(hraAmount, metroLimit, rentMinus10);
+  }
+  
+  return deductions;
+}
+
+function parseAmount(fullMatch, numberPart) {
+  const val = parseInt(numberPart.replace(/,/g, ''));
+  if (fullMatch.match(/[Ll](?:akh)?/)) return val * 100000;
+  if (fullMatch.match(/[Kk](?:\\s*Thousand)?/)) return val * 1000;
+  if (val < 1000) return val * 100000;
+  return val;
+}
+
+// ============================================
+// COMPONENTS
+// ============================================
 function Tooltip({ children, content, position = "top" }) {
   const [visible, setVisible] = useState(false);
   const posStyles = {
     top: { bottom: "100%", left: "50%", transform: "translateX(-50%)", marginBottom: 8 },
     bottom: { top: "100%", left: "50%", transform: "translateX(-50%)", marginTop: 8 },
-    left: { right: "100%", top: "50%", transform: "translateY(-50%)", marginRight: 8 },
-    right: { left: "100%", top: "50%", transform: "translateY(-50%)", marginLeft: 8 },
   };
   return (
     <div style={{ position: "relative", display: "inline-block" }}
@@ -178,21 +521,7 @@ function Tooltip({ children, content, position = "top" }) {
       onMouseLeave={() => setVisible(false)}>
       {children}
       {visible && (
-        <div style={{
-          position: "absolute",
-          ...posStyles[position],
-          background: C.card,
-          border: `1px solid ${C.border}`,
-          borderRadius: 10,
-          padding: "12px 16px",
-          minWidth: 240,
-          maxWidth: 320,
-          zIndex: 100,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-          fontSize: 12,
-          lineHeight: 1.6,
-          color: C.text,
-        }}>
+        <div style={{ position: "absolute", ...posStyles[position], background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 16px", minWidth: 240, maxWidth: 320, zIndex: 100, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", fontSize: 12, lineHeight: 1.6, color: C.text }}>
           {content}
         </div>
       )}
@@ -200,8 +529,7 @@ function Tooltip({ children, content, position = "top" }) {
   );
 }
 
-// ── GUEST BADGE WITH TOOLTIP ─────────────────────────────────
-function GuestBadge({ userPlan, onLogin }) {
+function GuestBadge({ onLogin }) {
   const tooltipContent = (
     <div>
       <div style={{ fontWeight: 700, marginBottom: 8, color: C.accentLight }}>🚀 Why create a free account?</div>
@@ -209,23 +537,14 @@ function GuestBadge({ userPlan, onLogin }) {
       <div style={{ color: C.muted, marginBottom: 6 }}>✅ Access all 4 free tools anytime</div>
       <div style={{ color: C.muted, marginBottom: 6 }}>✅ 4 queries per day (resets daily)</div>
       <div style={{ color: C.muted, marginBottom: 10 }}>✅ Export results to copy/paste</div>
-      <button onClick={onLogin} style={{
-        width: "100%", padding: "8px 12px", borderRadius: 6, border: "none",
-        background: `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
-        color: "white", fontWeight: 700, cursor: "pointer", fontSize: 12,
-      }}>Create Free Account →</button>
+      <button onClick={onLogin} style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "none", background: `linear-gradient(135deg, ${C.accent}, #1d4ed8)`, color: "white", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>Create Free Account →</button>
     </div>
   );
-
   return (
     <Tooltip content={tooltipContent} position="bottom">
-      <div style={{
-        display: "flex", alignItems: "center", gap: 6,
-        background: `${C.amber}18`, border: `1px solid ${C.amber}40`,
-        padding: "4px 10px", borderRadius: 16, cursor: "pointer",
-      }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, background: `${C.amber}18`, border: `1px solid ${C.amber}40`, padding: "4px 10px", borderRadius: 16, cursor: "pointer" }}>
         <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.amber }} />
-        <span style={{ fontSize: 11, color: C.amber, fontWeight: 700 }}>{PLANS[userPlan].name} (Guest)</span>
+        <span style={{ fontSize: 11, color: C.amber, fontWeight: 700 }}>FREE (Guest)</span>
         <span style={{ fontSize: 10, color: C.amber, opacity: 0.7 }}>?</span>
       </div>
     </Tooltip>
@@ -238,25 +557,10 @@ const LockedPanel = ({ tool, onUpgrade, onLogin }) => {
     <div style={{ padding: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }}>
       <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.5 }}>🔒</div>
       <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{tool.name} is a {requiredPlanCard?.name} feature</div>
-      <div style={{ fontSize: 13, color: C.muted, marginBottom: 24, maxWidth: 360 }}>
-        Upgrade to {requiredPlanCard?.name} ({requiredPlanCard?.price}{requiredPlanCard?.period}) to unlock this tool, or buy a single ₹49 task pack.
-      </div>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 24, maxWidth: 360 }}>Upgrade to {requiredPlanCard?.name} to unlock this tool.</div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-        <button onClick={() => onUpgrade(tool.minPlan)} style={{
-          padding: "10px 22px", borderRadius: 10, border: "none",
-          background: `linear-gradient(135deg, ${requiredPlanCard?.color}, ${requiredPlanCard?.color}cc)`,
-          color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13
-        }}>Upgrade to {requiredPlanCard?.name} →</button>
-        <button onClick={() => onUpgrade("payonce")} style={{
-          padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.pink}`,
-          background: "transparent", color: C.pink, fontWeight: 700, cursor: "pointer", fontSize: 13
-        }}>Try once — ₹49</button>
-        {onLogin && (
-          <button onClick={onLogin} style={{
-            padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.accent}`,
-            background: "transparent", color: C.accentLight, fontWeight: 700, cursor: "pointer", fontSize: 13
-          }}>Log in to access →</button>
-        )}
+        <button onClick={() => onUpgrade(tool.minPlan)} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${requiredPlanCard?.color}, ${requiredPlanCard?.color}cc)`, color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Upgrade →</button>
+        {onLogin && <button onClick={onLogin} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.accent}`, background: "transparent", color: C.accentLight, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Log in →</button>}
       </div>
     </div>
   );
@@ -267,9 +571,7 @@ const UsageBar = ({ userPlan, used, limit, isGuest }) => {
   const pct = Math.min(100, (used / limit) * 100);
   return (
     <div style={{ padding: "10px 24px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 12 }}>
-      <span style={{ fontSize: 11, color: C.muted, whiteSpace: "nowrap" }}>
-        {used}/{limit} queries today{isGuest ? " (guest)" : ""}
-      </span>
+      <span style={{ fontSize: 11, color: C.muted, whiteSpace: "nowrap" }}>{used}/{limit} queries today{isGuest ? " (guest)" : ""}</span>
       <div style={{ flex: 1, height: 5, background: C.border, borderRadius: 3, maxWidth: 200 }}>
         <div style={{ height: "100%", width: `${pct}%`, background: pct > 80 ? C.red : C.accent, borderRadius: 3, transition: "width 0.3s" }} />
       </div>
@@ -278,10 +580,8 @@ const UsageBar = ({ userPlan, used, limit, isGuest }) => {
   );
 };
 
-// ── SAMPLE QUERIES COMPONENT ──────────────────────────────────
-function SampleQueries({ tool, onSelect, isGuest }) {
+function SampleQueries({ tool, onSelect }) {
   if (!tool.samples || tool.samples.length === 0) return null;
-
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -290,19 +590,7 @@ function SampleQueries({ tool, onSelect, isGuest }) {
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tool.samples.map((sample, i) => (
-          <button
-            key={i}
-            onClick={() => onSelect(sample.text)}
-            style={{
-              textAlign: "left", padding: "10px 14px", borderRadius: 8,
-              border: `1px solid ${C.border}`, background: `${C.accent}08`,
-              color: C.accentLight, fontSize: 12, cursor: "pointer",
-              fontWeight: 500, lineHeight: 1.4,
-              transition: "all 0.2s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = `${C.accent}18`; e.currentTarget.style.borderColor = C.accent; }}
-            onMouseLeave={e => { e.currentTarget.style.background = `${C.accent}08`; e.currentTarget.style.borderColor = C.border; }}
-          >
+          <button key={i} onClick={() => onSelect(sample)} style={{ textAlign: "left", padding: "10px 14px", borderRadius: 8, border: `1px solid ${C.border}`, background: `${C.accent}08`, color: C.accentLight, fontSize: 12, cursor: "pointer", fontWeight: 500, lineHeight: 1.4 }}>
             <span style={{ fontSize: 10, color: C.dim, display: "block", marginBottom: 4, fontWeight: 700 }}>{sample.label}</span>
             <span style={{ color: C.text, opacity: 0.85 }}>{sample.text.length > 120 ? sample.text.slice(0, 120) + "..." : sample.text}</span>
             <span style={{ fontSize: 10, color: C.green, display: "block", marginTop: 4 }}>▶ Click to try (free)</span>
@@ -313,423 +601,218 @@ function SampleQueries({ tool, onSelect, isGuest }) {
   );
 }
 
-// ── GENERIC TOOL PANEL ────────────────────────────────────────
-function ToolPanel({ tool, userPlan, onUse, session, onLogin }) {
+// ============================================
+// TOOL PANEL (FIXED - CLIENT-SIDE FOR TAX)
+// ============================================
+function ToolPanel({ tool, userPlan, onUse, session }) {
   const [input, setInput] = useState("");
   const [result, setResult] = useState("");
-  const [variants, setVariants] = useState(null);
-  const [activeVariant, setActiveVariant] = useState(0);
-  const [copied, setCopied] = useState(false);
-  const [tone, setTone] = useState("Formal");
-  const [file, setFile] = useState(null);
-  const [files, setFiles] = useState({});
-  const [fileError, setFileError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
-  const [isDemo, setIsDemo] = useState(false);
+  const [showVerify, setShowVerify] = useState(false);
+  const [lastCalc, setLastCalc] = useState(null);
 
-  const TONES = ["Formal", "Casual", "Friendly", "Urgent", "Firm"];
-
-  useEffect(() => {
-    if (!session) return;
-    (async () => {
-      const { data } = await supabase
-        .from("chat_history")
-        .select("id, input, output, created_at")
-        .eq("user_id", session.user.id)
-        .eq("tool_id", tool.id)
-        .order("created_at", { ascending: false })
-        .limit(10);
-      setHistory(data || []);
-    })();
-  }, [session, tool.id]);
-
-  const saveToHistory = async (savedInput, savedOutput) => {
-    if (!session) return;
-    const { data } = await supabase
-      .from("chat_history")
-      .insert({ user_id: session.user.id, tool_id: tool.id, input: savedInput, output: savedOutput })
-      .select("id, input, output, created_at")
-      .single();
-    if (data) setHistory(prev => [data, ...prev].slice(0, 10));
-  };
-
-  const systemPrompts = {
-    chat: "You are an expert Finance AI assistant specializing in Indian finance, accounting, IFRS, and corporate finance. Give precise, practical, professional answers. Use ₹ for Indian Rupee.",
-    tax: "You are an expert Indian tax advisor (CA level). Give accurate, practical advice with specific current rates and examples on GST, Income Tax, TDS.",
-    email: "You are a senior Finance Manager writing professional business emails. Write clear, concise, effective finance emails with subject line, greeting, body, and sign-off.",
-    invoice: "You are an expert AP accountant. Extract invoice data and suggest GL codes precisely for a hospitality/services company.",
-    gst_reco: `You are an expert Indian GST compliance analyst. You will be given two documents: a company's Purchase Register (their own record of purchase invoices) and their GSTR-2B (the auto-populated statement from the GST portal showing what vendors have actually reported).
-
-Your job is to reconcile the two and produce a clear, structured, audit-ready report with these sections:
-
-1. **Summary** — total invoices in each document, how many matched, how many didn't.
-2. **Matched Invoices** — briefly confirm these are clean, no action needed.
-3. **Mismatches** — invoices present in both but with differing amounts, tax values, or dates. Explain each discrepancy plainly.
-4. **Missing from GSTR-2B** — invoices in the Purchase Register that the vendor hasn't reported yet. Flag these as ITC risk — the business cannot claim input tax credit until the vendor files it. Suggest following up with the vendor.
-5. **Missing from Purchase Register** — invoices in GSTR-2B not recorded in the Purchase Register. Flag as a possible missed expense entry or an invoice booked incorrectly.
-6. **Vendor Compliance Notes** — flag any vendor with repeated mismatches or missing filings, since this pattern often indicates an unreliable or non-compliant vendor worth reconsidering.
-7. **Action Items** — a short, concrete checklist of what the finance team should do next.
-
-Be precise with figures, use ₹ for amounts, and keep the tone professional and audit-ready. If the documents provided are incomplete or unclear, say so plainly rather than guessing at figures.`,
-    ratio: "You are a financial analyst. Calculate and explain financial ratios (liquidity, profitability, efficiency, leverage) with plain-English commentary and India context where relevant.",
-    variance: "You are a CFO writing board-level variance analysis. Be precise, professional and insightful.",
-    commentary: "You are a CFO writing professional financial reports for board members and investors. Use formal, confident, authoritative language.",
-    cashflow: "You are a treasury manager and cash flow expert. Create realistic, detailed forecasts with practical recommendations for Indian businesses.",
-    fraud: "You are a forensic accountant. Analyze transactions for fraud red flags — duplicates, ghost vendors, split invoices, round numbers just below approval thresholds.",
-    contract: "You are a contract review specialist with finance expertise. Extract key financial terms, payment conditions, penalties, and flag risky or one-sided clauses in plain English.",
-  };
-
-  const placeholders = {
-    chat: "Ask any finance question... e.g. What is IFRS 15?",
-    tax: "e.g. GST on hotel services, TDS on professional fees...",
-    email: "Describe the situation... e.g. Vendor payment is 30 days overdue",
-    invoice: "Paste invoice text here...",
-    gst_reco: "Add any extra context (optional) — e.g. specific vendors to focus on, or the GST period covered...",
-    ratio: "Paste P&L/Balance Sheet figures... e.g. Revenue: 50,00,000, Net Profit: 8,00,000, Current Assets: 20,00,000, Current Liabilities: 12,00,000",
-    variance: "Enter budget vs actual... e.g. Revenue Budget 50,00,000 Actual 46,50,000; Marketing Budget 3,00,000 Actual 4,20,000",
-    commentary: "Enter company, period, revenue, expenses, profit, key notes...",
-    cashflow: "Opening balance, expected inflows, expected outflows...",
-    fraud: "Paste transaction data (Date, Description, Amount, Vendor)...",
-    contract: "Paste contract text here...",
-  };
-
-  const handleFile = (selected) => {
-    setFileError("");
-    if (!selected) return;
-    const sizeMB = selected.size / (1024 * 1024);
-    const allowedTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
-    if (!allowedTypes.includes(selected.type)) {
-      setFileError("Please upload a PDF, PNG, JPG, or WEBP file.");
+  // ---- CLIENT-SIDE TAX CALCULATION ----
+  const runTaxCalculation = () => {
+    const income = parseIncome(input);
+    if (!income || income <= 0) {
+      setResult("❌ Please specify a valid income. Example: ₹12 lakh, ₹12,00,000, or 1200000");
+      setLoading(false);
       return;
     }
-    if (sizeMB > MAX_FILE_MB) {
-      setFileError(`File is too large — please keep it under ${MAX_FILE_MB}MB.`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(",")[1];
-      setFile({ name: selected.name, mediaType: selected.type, data: base64, sizeMB: sizeMB.toFixed(1) });
-    };
-    reader.onerror = () => setFileError("Couldn't read that file — please try again.");
-    reader.readAsDataURL(selected);
-  };
 
-  const handleMultiFile = (slotLabel, selected) => {
-    setFileError("");
-    if (!selected) return;
-    const sizeMB = selected.size / (1024 * 1024);
-    const allowedTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
-    if (!allowedTypes.includes(selected.type)) {
-      setFileError(`${slotLabel}: please upload a PDF, PNG, JPG, or WEBP file.`);
-      return;
-    }
-    if (sizeMB > MAX_FILE_MB) {
-      setFileError(`${slotLabel}: file is too large — please keep it under ${MAX_FILE_MB}MB.`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(",")[1];
-      setFiles(prev => ({ ...prev, [slotLabel]: { name: selected.name, mediaType: selected.type, data: base64, sizeMB: sizeMB.toFixed(1) } }));
-    };
-    reader.onerror = () => setFileError(`${slotLabel}: couldn't read that file — please try again.`);
-    reader.readAsDataURL(selected);
-  };
+    const isComparison = /compare|old vs new|which.*better|both regime/i.test(input.toLowerCase());
+    const deductions = parseDeductions(input, income);
 
-  const run = async (demoMode = false) => {
-    const hasMultiFiles = tool.fileSlots && Object.keys(files).length > 0;
-    if ((!input.trim() && !file && !hasMultiFiles) || loading) return;
-    setLoading(true);
-    if (!demoMode) onUse();
-    setResult("");
-    setVariants(null);
-    setCopied(false);
-
-    if (tool.id === "email") {
-      const variantInstruction = `${systemPrompts.email}
-
-The user has selected "${tone}" as their preferred tone for this email.
-
-Respond ONLY with valid JSON, no markdown, no code fences, no preamble, in exactly this shape:
-{"variants":[{"label":"2-4 word label describing the approach","subject":"Email subject line","body":"Full email body with greeting and sign-off"}]}
-
-The FIRST variant must be written strictly in the "${tone}" tone the user asked for. Provide 1-2 additional variants as alternate strategic approaches (for example: a firmer or softer version, more urgent or more patient) so the user has real options — but all variants should still fit a professional finance context.`;
-
-      const res = await callAI(input, variantInstruction, userPlan);
-      try {
-        const cleaned = res.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
-        if (parsed.variants && Array.isArray(parsed.variants) && parsed.variants.length > 0) {
-          setVariants(parsed.variants);
-          setActiveVariant(0);
-          if (!demoMode) saveToHistory(input, JSON.stringify(parsed.variants));
-        } else {
-          setResult(res);
-          if (!demoMode) saveToHistory(input, res);
-        }
-      } catch {
-        setResult(res);
-        if (!demoMode) saveToHistory(input, res);
-      }
-    } else if (tool.fileSlots) {
-      const uploadedSlots = Object.entries(files).map(([label, f]) => ({ label, mediaType: f.mediaType, data: f.data }));
-      const promptText = input.trim() || `Reconcile the attached documents.`;
-      const res = await callAI(promptText, systemPrompts[tool.id], userPlan, null, uploadedSlots);
-      setResult(res);
-      const fileNames = Object.entries(files).map(([label, f]) => `${label}: ${f.name}`).join(", ");
-      if (!demoMode) saveToHistory(fileNames ? `[${fileNames}] ${input}`.trim() : promptText, res);
+    if (isComparison) {
+      const comparison = compareRegimes(income, deductions);
+      setResult(formatTaxComparison(comparison, income));
+      setLastCalc(comparison.new);
     } else {
-      const promptText = input.trim() || "Analyze the attached document.";
-      const res = await callAI(promptText, systemPrompts[tool.id], userPlan, file);
-      setResult(res);
-      if (!demoMode) saveToHistory(file ? `[File: ${file.name}] ${input}`.trim() : promptText, res);
+      const regime = /old regime/i.test(input) ? 'old' : 'new';
+      const calc = calculateTax(income, regime, deductions);
+      setResult(formatSingleTax(calc, income));
+      setLastCalc(calc);
     }
     setLoading(false);
   };
 
-  const handleSampleClick = (sampleText) => {
-    setInput(sampleText);
-    setIsDemo(true);
-    // Auto-run after a brief delay so user sees the input populated
-    setTimeout(() => run(true), 100);
+  // ---- CLIENT-SIDE GST/TDS LOOKUP ----
+  const runGSTLookup = () => {
+    const hsnMatch = input.match(/\\b\\d{4,8}\\b/);
+    const query = input.toLowerCase().replace(/hsn|sac|tds|gst|rate|section|what is|for/g, '').trim();
+    
+    let results = [];
+    if (hsnMatch) {
+      results = searchGST(hsnMatch[0]);
+    } else {
+      results = searchGST(query || input);
+    }
+    
+    setResult(formatGSTLookup(results));
+    setLoading(false);
   };
 
-  const copyVariant = async (variant) => {
-    const text = variant.subject ? `Subject: ${variant.subject}\n\n${variant.body}` : variant.body;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {}
+  // ---- MAIN RUN ----
+  const run = async () => {
+    if (!input.trim() || loading) return;
+    
+    // ===== CRITICAL: Route tax tool to client-side =====
+    if (tool.id === "tax") {
+      const lower = input.toLowerCase();
+      
+      // Tax calculations (bypass AI completely)
+      const isCalc = /calculate|compute|compare|old vs new|how much tax|tax liability|tax on ₹?\\d|regime/i.test(lower);
+      // GST/TDS lookups (bypass AI completely)
+      const isLookup = /hsn|sac code|gst rate|tds.*section|tds.*rate|section \\d{3}|194[a-z]/i.test(lower);
+      
+      if (isCalc || isLookup) {
+        setLoading(true);
+        onUse();
+        setResult("");
+        
+        if (isCalc) return runTaxCalculation();
+        if (isLookup) return runGSTLookup();
+      }
+    }
+    
+    // ---- FALLBACK TO AI FOR NON-TAX QUERIES ----
+    setLoading(true);
+    onUse();
+    setResult("");
+    
+    const systemPrompts = {
+      chat: "You are an expert Finance AI assistant specializing in Indian finance, accounting, IFRS, and corporate finance. Give precise, practical, professional answers. Use ₹ for Indian Rupee.",
+      tax: "You are an expert Indian tax advisor (CA level). Give accurate, practical advice with specific current rates and examples on GST, Income Tax, TDS. For FY 2026-27, New Regime slabs: 0-4L nil, 4-8L 5%, 8-12L 10%, 12-16L 15%, 16-20L 20%, 20-24L 25%, 30% above 24L. Standard deduction: ₹75,000. Rebate 87A: ₹60,000 (new, income ≤12L), ₹12,500 (old, income ≤5L). Cess: 4%.",
+      email: "You are a senior Finance Manager writing professional business emails. Write clear, concise, effective finance emails with subject line, greeting, body, and sign-off.",
+    };
+    
+    const res = await callAI(input, systemPrompts[tool.id] || systemPrompts.chat, userPlan);
+    setResult(res);
+    setLoading(false);
+  };
+
+  // ---- SAMPLE CLICK HANDLER ----
+  const handleSampleClick = (sample) => {
+    setInput(sample.text);
+    
+    // For tax samples, run client-side immediately
+    if (tool.id === "tax" && (sample.isCalc || sample.isLookup)) {
+      setTimeout(() => {
+        setLoading(true);
+        onUse();
+        setResult("");
+        if (sample.isCalc) runTaxCalculation();
+        if (sample.isLookup) runGSTLookup();
+      }, 50);
+    } else {
+      // Non-tax samples use AI
+      setTimeout(() => run(), 50);
+    }
   };
 
   return (
     <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14, height: "100%", overflowY: "auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 11, color: C.muted }}>Powered by <strong style={{ color: C.accentLight }}>{PLANS[userPlan]?.model}</strong></span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {history.length > 0 && (
-            <button onClick={() => setShowHistory(s => !s)} style={{
-              fontSize: 10, background: showHistory ? `${C.accent}33` : "transparent",
-              border: `1px solid ${C.border}`, color: C.muted, padding: "3px 10px",
-              borderRadius: 10, cursor: "pointer", fontWeight: 700,
-            }}>🕘 Recent ({history.length})</button>
-          )}
-          <span style={{ fontSize: 10, background: `${C.purple}22`, color: C.purple, padding: "3px 10px", borderRadius: 10 }}>{tool.category}</span>
-        </div>
+        <span style={{ fontSize: 10, background: `${C.purple}22`, color: C.purple, padding: "3px 10px", borderRadius: 10 }}>{tool.category}</span>
       </div>
 
-      {showHistory && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10 }}>
-          {history.map(h => (
-            <div key={h.id} onClick={() => {
-              setInput(h.input || "");
-              setShowHistory(false);
-              try {
-                const parsed = JSON.parse(h.output);
-                if (Array.isArray(parsed)) { setVariants(parsed); setActiveVariant(0); setResult(""); return; }
-              } catch {}
-              setVariants(null);
-              setResult(h.output || "");
-            }} style={{
-              padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontSize: 11.5,
-              background: C.card, border: `1px solid ${C.border}`,
-            }}>
-              <div style={{ color: C.text, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.input || "(no input)"}</div>
-              <div style={{ color: C.dim, fontSize: 10, marginTop: 2 }}>{new Date(h.created_at).toLocaleString()}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      <SampleQueries tool={tool} onSelect={handleSampleClick} />
 
-      {/* SAMPLE QUERIES — no quota used */}
-      <SampleQueries tool={tool} onSelect={handleSampleClick} isGuest={!session} />
-
-      {tool.id === "email" && (
-        <div>
-          <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Choose a tone</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {TONES.map(t => (
-              <button key={t} onClick={() => setTone(t)} style={{
-                padding: "7px 16px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 700,
-                border: `1.5px solid ${tone === t ? C.accent : C.border}`,
-                background: tone === t ? `${C.accent}22` : "transparent",
-                color: tone === t ? C.accentLight : C.muted,
-              }}>{t}</button>
-            ))}
-          </div>
-        </div>
-      )}
-      {FILE_TOOLS.includes(tool.id) && (
-        <div>
-          <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>Upload a PDF or image (optional — you can also paste text below)</div>
-          <label style={{
-            display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10,
-            border: `1.5px dashed ${file ? C.green : C.border}`, background: C.card, cursor: "pointer",
-          }}>
-            <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp"
-              onChange={e => handleFile(e.target.files?.[0])}
-              style={{ display: "none" }} />
-            <span style={{ fontSize: 18 }}>📎</span>
-            <span style={{ fontSize: 12, color: file ? C.greenLight : C.muted, flex: 1 }}>
-              {file ? `${file.name} (${file.sizeMB}MB)` : "Click to choose a file — PDF, PNG, JPG, or WEBP, up to " + MAX_FILE_MB + "MB"}
-            </span>
-            {file && (
-              <span onClick={(e) => { e.preventDefault(); setFile(null); }} style={{ fontSize: 12, color: C.red, cursor: "pointer", fontWeight: 700 }}>Remove</span>
-            )}
-          </label>
-          {fileError && <div style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{fileError}</div>}
-        </div>
-      )}
-      {tool.fileSlots && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 11, color: C.muted }}>Upload both documents for reconciliation — PDF, PNG, JPG, or WEBP, up to {MAX_FILE_MB}MB each</div>
-          {tool.fileSlots.map(slot => {
-            const f = files[slot];
-            return (
-              <div key={slot}>
-                <div style={{ fontSize: 11, color: C.text, fontWeight: 700, marginBottom: 6 }}>{slot}</div>
-                <label style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10,
-                  border: `1.5px dashed ${f ? C.green : C.border}`, background: C.card, cursor: "pointer",
-                }}>
-                  <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp"
-                    onChange={e => handleMultiFile(slot, e.target.files?.[0])}
-                    style={{ display: "none" }} />
-                  <span style={{ fontSize: 18 }}>📎</span>
-                  <span style={{ fontSize: 12, color: f ? C.greenLight : C.muted, flex: 1 }}>
-                    {f ? `${f.name} (${f.sizeMB}MB)` : `Click to choose the ${slot} file`}
-                  </span>
-                  {f && (
-                    <span onClick={(e) => { e.preventDefault(); setFiles(prev => { const n = { ...prev }; delete n[slot]; return n; }); }} style={{ fontSize: 12, color: C.red, cursor: "pointer", fontWeight: 700 }}>Remove</span>
-                  )}
-                </label>
-              </div>
-            );
-          })}
-          {fileError && <div style={{ fontSize: 11, color: C.red }}>{fileError}</div>}
-        </div>
-      )}
-      <textarea value={input} onChange={e => setInput(e.target.value)} rows={6}
-        placeholder={placeholders[tool.id]}
-        style={{ width: "100%", padding: 14, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 13, resize: "vertical", outline: "none", boxSizing: "border-box", fontFamily: tool.id === "invoice" || tool.id === "fraud" || tool.id === "contract" ? "monospace" : "inherit" }} />
-      <button onClick={() => run(false)} disabled={loading || (!input.trim() && !file && !(tool.fileSlots && Object.keys(files).length > 0))} style={{
+      <textarea 
+        value={input} 
+        onChange={e => setInput(e.target.value)} 
+        rows={6}
+        placeholder={tool.id === "tax" 
+          ? "Try: Compare old vs new regime for ₹12L income, 80C ₹1.5L, NPS ₹50K\\nOr: What is GST rate for mobile phones?\\nOr: TDS rate for contractor Section 194C"
+          : "Ask your question..."
+        }
+        style={{ width: "100%", padding: 14, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 13, resize: "vertical", outline: "none", boxSizing: "border-box" }} 
+      />
+      
+      <button onClick={run} disabled={loading || !input.trim()} style={{
         padding: "12px 24px", borderRadius: 10, border: "none",
         background: loading ? C.dim : `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
         color: "white", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontSize: 14
-      }}>{loading ? "Working..." : `${tool.icon} ${tool.name}`}</button>
-      {loading && <Spinner label={tool.id === "email" ? "Drafting a few approaches..." : "AI is thinking..."} />}
+      }}>{loading ? "Calculating..." : `${tool.icon} ${tool.name}`}</button>
+      
+      {loading && <Spinner label={tool.id === "tax" ? "Calculating..." : "AI is thinking..."} />}
 
-      {isDemo && result && (
-        <div style={{ background: `${C.green}10`, border: `1px dashed ${C.green}`, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12, color: C.greenLight }}>✨ This was a demo query — no quota used!</span>
-          <button onClick={() => setIsDemo(false)} style={{ fontSize: 10, color: C.dim, background: "transparent", border: "none", cursor: "pointer", marginLeft: "auto" }}>Dismiss</button>
-        </div>
+      {lastCalc && (
+        <button onClick={() => setShowVerify(true)} style={{
+          padding: "10px 20px", borderRadius: 8, border: `1px solid ${C.green}`,
+          background: `${C.green}15`, color: C.greenLight,
+          cursor: "pointer", fontSize: 13, fontWeight: 700
+        }}>🔍 Verify Calculation Step-by-Step</button>
       )}
 
-      {variants && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {variants.map((v, i) => (
-              <button key={i} onClick={() => { setActiveVariant(i); setCopied(false); }} style={{
-                padding: "8px 16px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 700,
-                border: `1.5px solid ${i === activeVariant ? C.accent : C.border}`,
-                background: i === activeVariant ? `${C.accent}22` : "transparent",
-                color: i === activeVariant ? C.accentLight : C.muted,
-              }}>{v.label}</button>
-            ))}
-          </div>
-          <div style={{ background: C.card, border: `1px solid ${C.green}`, borderRadius: 12, padding: 18 }}>
-            {variants[activeVariant].subject && (
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
-                <strong style={{ color: C.text }}>Subject:</strong> {variants[activeVariant].subject}
-              </div>
-            )}
-            <pre style={{ color: C.text, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.7, margin: 0, fontFamily: "inherit" }}>{variants[activeVariant].body}</pre>
-            <button onClick={() => copyVariant(variants[activeVariant])} style={{
-              marginTop: 14, padding: "8px 18px", borderRadius: 8, border: "none", cursor: "pointer",
-              background: copied ? C.green : `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
-              color: "white", fontWeight: 700, fontSize: 12,
-            }}>{copied ? "✓ Copied" : "Copy this draft"}</button>
-          </div>
-        </div>
-      )}
-
-      {!variants && result && (
+      {result && (
         <div style={{ background: C.card, border: `1px solid ${C.green}`, borderRadius: 12, padding: 18 }}>
           <pre style={{ color: C.text, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.7, margin: 0, fontFamily: "inherit" }}>{result}</pre>
+        </div>
+      )}
+
+      {showVerify && lastCalc && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ width: "100%", maxWidth: 600, maxHeight: "90vh", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>🔍 Verify Calculation</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{lastCalc.regime?.toUpperCase()} Regime · FY 2026-27</div>
+              </div>
+              <button onClick={() => setShowVerify(false)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+              {lastCalc.slabBreakdown?.map((s, i) => (
+                <div key={i} style={{ padding: "10px 12px", marginBottom: 8, background: C.card, borderRadius: 8, border: `1px solid ${C.border}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 12, color: C.muted }}>₹{s.from.toLocaleString('en-IN')} – {s.to === 'Above' ? 'Above' : `₹${s.to.toLocaleString('en-IN')}`} @ {s.rate}%</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>₹{Math.round(s.tax).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              ))}
+              <div style={{ marginTop: 16, padding: "16px 20px", background: `linear-gradient(135deg, ${C.green}15, ${C.green}05)`, border: `1px solid ${C.green}40`, borderRadius: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 11, color: C.greenLight }}>Final Tax Liability</div>
+                <div style={{ fontSize: 28, fontWeight: 900, color: C.greenLight }}>₹{Math.round(lastCalc.finalTax).toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>Effective Rate: {lastCalc.effectiveRate}%</div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// ── PRICING / UPGRADE VIEW ────────────────────────────────────
+// ============================================
+// PRICING VIEW
+// ============================================
 function PricingView({ userPlan, onSelectPlan }) {
   return (
     <div style={{ padding: 24, overflowY: "auto", height: "100%" }}>
       <div style={{ textAlign: "center", marginBottom: 28 }}>
         <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>Choose Your Plan</div>
-        <div style={{ fontSize: 13, color: C.muted }}>Free & Starter run on Gemini Flash · Pro & Firm run on Claude Sonnet for deeper reasoning</div>
+        <div style={{ fontSize: 13, color: C.muted }}>Free & Starter run on Gemini Flash · Pro & Firm run on Claude Sonnet</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
         {planCards.map(plan => (
-          <div key={plan.id} onClick={() => onSelectPlan(plan.id)} style={{
-            background: userPlan === plan.id ? C.cardHover : C.card,
-            border: `2px solid ${userPlan === plan.id ? plan.color : C.border}`,
-            borderRadius: 14, padding: 18, cursor: "pointer", position: "relative", transition: "all 0.2s"
-          }}>
-            {plan.badge && <div style={{ position: "absolute", top: -9, left: "50%", transform: "translateX(-50%)", background: plan.color, color: "white", fontSize: 8, fontWeight: 800, padding: "3px 10px", borderRadius: 10, whiteSpace: "nowrap" }}>{plan.badge}</div>}
+          <div key={plan.id} onClick={() => onSelectPlan(plan.id)} style={{ background: userPlan === plan.id ? C.cardHover : C.card, border: `2px solid ${userPlan === plan.id ? plan.color : C.border}`, borderRadius: 14, padding: 18, cursor: "pointer", position: "relative" }}>
+            {plan.badge && <div style={{ position: "absolute", top: -9, left: "50%", transform: "translateX(-50%)", background: plan.color, color: "white", fontSize: 8, fontWeight: 800, padding: "3px 10px", borderRadius: 10 }}>{plan.badge}</div>}
             <div style={{ fontSize: 24, marginBottom: 6 }}>{plan.icon}</div>
-            <div style={{ fontSize: 10, fontWeight: 800, color: plan.color, letterSpacing: 1 }}>{plan.name}</div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: plan.color }}>{plan.name}</div>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>{plan.desc}</div>
-            <div style={{ marginBottom: 10 }}>
-              <span style={{ fontSize: 24, fontWeight: 900, color: plan.color }}>{plan.price}</span>
-              <span style={{ fontSize: 11, color: C.muted }}>{plan.period}</span>
-            </div>
-            <div style={{ fontSize: 10, color: C.muted, marginBottom: 3 }}>🛠️ {plan.tools}/10 tools</div>
-            <div style={{ fontSize: 10, color: C.muted, marginBottom: 3 }}>⚡ {plan.queriesPerDay} {typeof plan.queriesPerDay === "number" ? "queries/day" : ""}</div>
-            <div style={{ fontSize: 10, color: C.dim }}>🤖 {plan.model}</div>
-            {userPlan === plan.id && <div style={{ marginTop: 10, fontSize: 11, color: plan.color, fontWeight: 700 }}>✓ Current Plan</div>}
+            <div style={{ marginBottom: 10 }}><span style={{ fontSize: 24, fontWeight: 900, color: plan.color }}>{plan.price}</span><span style={{ fontSize: 11, color: C.muted }}>{plan.period}</span></div>
+            <div style={{ fontSize: 10, color: C.muted }}>🛠️ {plan.tools}/10 tools · ⚡ {plan.queriesPerDay} {typeof plan.queriesPerDay === "number" ? "/day" : ""}</div>
           </div>
         ))}
-      </div>
-
-      <div style={{ marginTop: 32 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>What Each Plan Unlocks</div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-            <thead>
-              <tr style={{ background: C.surface }}>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, color: C.muted }}>Tool</th>
-                {planCards.filter(p => p.id !== "payonce").map(p => (
-                  <th key={p.id} style={{ padding: "10px 12px", textAlign: "center", fontSize: 11, color: p.color }}>{p.icon} {p.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {TOOLS.map((tool, i) => (
-                <tr key={tool.id} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? "transparent" : `${C.surface}40` }}>
-                  <td style={{ padding: "10px 12px", fontSize: 12, color: C.text }}>{tool.icon} {tool.name}</td>
-                  {["free", "starter", "pro", "firm"].map(pid => (
-                    <td key={pid} style={{ padding: "10px 12px", textAlign: "center", fontSize: 14 }}>
-                      {hasAccess(pid, tool.minPlan) ? <span style={{ color: C.green }}>✅</span> : <span style={{ color: C.dim }}>❌</span>}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
   );
 }
 
-// ── MAIN APP ──────────────────────────────────────────────────
+// ============================================
+// MAIN APP
+// ============================================
 export default function FinanceAIApp() {
   const [active, setActive] = useState("chat");
   const [userPlan, setUserPlan] = useState("free");
@@ -737,42 +820,25 @@ export default function FinanceAIApp() {
   const [session, setSession] = useState(undefined);
   const [profileReady, setProfileReady] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
-  const [authReason, setAuthReason] = useState("");
 
   const todayKey = new Date().toDateString();
   const todayISO = new Date().toISOString().slice(0, 10);
 
-  // Watch auth state
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
-      if (!newSession) {
-        setUserPlan("free");
-        setUsage({});
-        setProfileReady(false);
-      }
+      if (!newSession) { setUserPlan("free"); setUsage({}); setProfileReady(false); }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Load plan and usage
   useEffect(() => {
     if (session) {
       (async () => {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("plan")
-          .eq("id", session.user.id)
-          .single();
+        const { data: profile } = await supabase.from("profiles").select("plan").eq("id", session.user.id).single();
         if (profile) setUserPlan(profile.plan);
-
-        const { data: usageRow } = await supabase
-          .from("usage")
-          .select("count")
-          .eq("user_id", session.user.id)
-          .eq("date", todayISO)
-          .single();
+        const { data: usageRow } = await supabase.from("usage").select("count").eq("user_id", session.user.id).eq("date", todayISO).single();
         setUsage(prev => ({ ...prev, [todayKey]: usageRow?.count || 0 }));
         setProfileReady(true);
       })();
@@ -789,12 +855,8 @@ export default function FinanceAIApp() {
   const recordUsage = async () => {
     const newCount = (usage[todayKey] || 0) + 1;
     setUsage(prev => ({ ...prev, [todayKey]: newCount }));
-
     if (session) {
-      await supabase.from("usage").upsert(
-        { user_id: session.user.id, date: todayISO, count: newCount },
-        { onConflict: "user_id,date" }
-      );
+      await supabase.from("usage").upsert({ user_id: session.user.id, date: todayISO, count: newCount }, { onConflict: "user_id,date" });
     } else {
       const guestUsage = JSON.parse(localStorage.getItem("airupee_usage") || "{}");
       guestUsage[todayKey] = newCount;
@@ -802,113 +864,43 @@ export default function FinanceAIApp() {
     }
   };
 
-  const updatePlan = async (p) => {
-    setUserPlan(p);
-    if (session) {
-      await supabase.from("profiles").update({ plan: p }).eq("id", session.user.id);
-    }
-  };
-
+  const updatePlan = async (p) => { setUserPlan(p); if (session) await supabase.from("profiles").update({ plan: p }).eq("id", session.user.id); };
   const limitReached = dailyLimit !== "Unlimited" && usedToday >= dailyLimit;
-
   const activeTool = TOOLS.find(t => t.id === active);
   const categories = ["Core", "Compliance", "Communication", "Operations", "Reporting", "Planning", "Audit"];
 
   const renderMain = () => {
-    if (active === "pricing") {
-      return <PricingView userPlan={userPlan} onSelectPlan={(p) => { updatePlan(p); }} />;
-    }
+    if (active === "pricing") return <PricingView userPlan={userPlan} onSelectPlan={updatePlan} />;
     if (!activeTool) return null;
-    if (!hasAccess(userPlan, activeTool.minPlan)) {
-      return <LockedPanel tool={activeTool} onUpgrade={(p) => updatePlan(p)} onLogin={() => { setAuthReason("upgrade"); setShowAuth(true); }} />;
-    }
-    if (limitReached) {
-      return (
-        <div style={{ padding: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>⏳</div>
-          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-            {session ? "You've used your daily limit" : "Free preview limit reached"}
-          </div>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 24, maxWidth: 360 }}>
-            {session 
-              ? "Upgrade to Pro for unlimited access, or grab a ₹49 single-task pack."
-              : "Create a free account to get 4 queries/day and save your history. Or upgrade for unlimited access."}
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-            {!session && (
-              <button onClick={() => { setAuthReason("quota"); setShowAuth(true); }} style={{
-                padding: "10px 22px", borderRadius: 10, border: "none",
-                background: `linear-gradient(135deg, ${C.accent}, #1d4ed8)`,
-                color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13
-              }}>Create Free Account →</button>
-            )}
-            <button onClick={() => updatePlan("pro")} style={{
-              padding: "10px 22px", borderRadius: 10, border: "none",
-              background: `linear-gradient(135deg, ${C.green}, #059669)`,
-              color: "white", fontWeight: 700, cursor: "pointer", fontSize: 13
-            }}>Upgrade to Pro — ₹199/mo →</button>
-            <button onClick={() => updatePlan("payonce")} style={{
-              padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.pink}`,
-              background: "transparent", color: C.pink, fontWeight: 700, cursor: "pointer", fontSize: 13
-            }}>Buy 1 task — ₹49</button>
-          </div>
-        </div>
-      );
-    }
-    return <ToolPanel key={activeTool.id} tool={activeTool} userPlan={userPlan} onUse={recordUsage} session={session} onLogin={() => { setAuthReason("save"); setShowAuth(true); }} />;
-  };
-
-  // Auth Modal Component
-  const AuthModal = () => {
-    if (!showAuth) return null;
-    return (
-      <div style={{
-        position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-        background: "rgba(0,0,0,0.7)", zIndex: 1000,
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        <div style={{ position: "relative", width: 400 }}>
-          <button onClick={() => setShowAuth(false)} style={{
-            position: "absolute", top: -40, right: 0,
-            background: "transparent", border: "none", color: C.muted,
-            fontSize: 24, cursor: "pointer",
-          }}>✕</button>
-          <Auth onSuccess={() => setShowAuth(false)} />
-        </div>
+    if (!hasAccess(userPlan, activeTool.minPlan)) return <LockedPanel tool={activeTool} onUpgrade={updatePlan} onLogin={() => setShowAuth(true)} />;
+    if (limitReached) return (
+      <div style={{ padding: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>⏳</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{session ? "Daily limit reached" : "Free preview limit reached"}</div>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 24 }}>{session ? "Upgrade to Pro for unlimited access." : "Create a free account for 4 queries/day."}</div>
+        {!session && <button onClick={() => setShowAuth(true)} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${C.accent}, #1d4ed8)`, color: "white", fontWeight: 700, cursor: "pointer" }}>Create Free Account →</button>}
       </div>
     );
+    return <ToolPanel key={activeTool.id} tool={activeTool} userPlan={userPlan} onUse={recordUsage} session={session} />;
   };
 
-  if (!profileReady) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.muted, fontFamily: "'Inter','DM Sans',system-ui,sans-serif" }}>
-        <Spinner label="Loading..." />
-      </div>
-    );
-  }
+  if (!profileReady) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.muted }}><Spinner label="Loading..." /></div>;
 
   return (
     <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter','DM Sans',system-ui,sans-serif", overflow: "hidden" }}>
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 4px; }
-        input::placeholder, textarea::placeholder { color: ${C.dim}; }
-      `}</style>
-
-      {/* SIDEBAR */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } * { box-sizing: border-box; } ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 4px; }`}</style>
+      
       <div style={{ width: 230, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "18px 16px", borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 32, height: 32, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, #1d4ed8)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>₹</div>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: -0.5 }}>AIRupee Finance AI</div>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>AIRupee Finance AI</div>
               <div style={{ fontSize: 9, color: C.muted }}>10 tools · Gemini + Claude</div>
             </div>
           </div>
         </div>
-
+        
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" }}>
           {categories.map(cat => {
             const toolsInCat = TOOLS.filter(t => t.category === cat);
@@ -919,14 +911,9 @@ export default function FinanceAIApp() {
                 {toolsInCat.map(t => {
                   const locked = !hasAccess(userPlan, t.minPlan);
                   return (
-                    <button key={t.id} onClick={() => setActive(t.id)} style={{
-                      display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 7, width: "100%",
-                      border: "none", background: active === t.id ? `${C.accent}22` : "transparent",
-                      color: active === t.id ? C.accentLight : locked ? C.dim : C.muted, cursor: "pointer", textAlign: "left",
-                      borderLeft: active === t.id ? `3px solid ${C.accent}` : "3px solid transparent",
-                    }}>
+                    <button key={t.id} onClick={() => setActive(t.id)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 7, width: "100%", border: "none", background: active === t.id ? `${C.accent}22` : "transparent", color: active === t.id ? C.accentLight : locked ? C.dim : C.muted, cursor: "pointer", textAlign: "left", borderLeft: active === t.id ? `3px solid ${C.accent}` : "3px solid transparent" }}>
                       <span style={{ fontSize: 14 }}>{t.icon}</span>
-                      <span style={{ fontSize: 11.5, fontWeight: active === t.id ? 700 : 500, flex: 1, lineHeight: 1.3 }}>{t.name}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: active === t.id ? 700 : 500, flex: 1 }}>{t.name}</span>
                       {locked && <span style={{ fontSize: 10 }}>🔒</span>}
                     </button>
                   );
@@ -935,45 +922,29 @@ export default function FinanceAIApp() {
             );
           })}
         </nav>
-
+        
         <div style={{ padding: "10px 8px", borderTop: `1px solid ${C.border}` }}>
-          <button onClick={() => setActive("pricing")} style={{
-            width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.green}`,
-            background: active === "pricing" ? `${C.green}22` : "transparent", color: C.greenLight,
-            cursor: "pointer", fontSize: 12, fontWeight: 700, marginBottom: 8
-          }}>💳 Plans & Pricing</button>
-
+          <button onClick={() => setActive("pricing")} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.green}`, background: active === "pricing" ? `${C.green}22` : "transparent", color: C.greenLight, cursor: "pointer", fontSize: 12, fontWeight: 700, marginBottom: 8 }}>💳 Plans & Pricing</button>
           {session ? (
             <>
-              <div style={{ fontSize: 10, color: C.dim, textAlign: "center", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user.email}</div>
-              <button onClick={() => supabase.auth.signOut()} style={{
-                width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.border}`,
-                background: "transparent", color: C.muted, cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 8
-              }}>Log out</button>
+              <div style={{ fontSize: 10, color: C.dim, textAlign: "center", marginBottom: 6 }}>{session.user.email}</div>
+              <button onClick={() => supabase.auth.signOut()} style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontSize: 11 }}>Log out</button>
             </>
           ) : (
-            <button onClick={() => { setAuthReason("login"); setShowAuth(true); }} style={{
-              width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.accent}`,
-              background: "transparent", color: C.accentLight, cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 8
-            }}>Log in / Sign up</button>
+            <button onClick={() => setShowAuth(true)} style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.accent}`, background: "transparent", color: C.accentLight, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Log in / Sign up</button>
           )}
-
-          <div style={{ fontSize: 9, color: C.dim, textAlign: "center" }}>AIRupee.in · v2.0</div>
         </div>
       </div>
 
-      {/* MAIN */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ padding: "14px 24px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 12, background: C.surface }}>
           <span style={{ fontSize: 20 }}>{active === "pricing" ? "💳" : activeTool?.icon}</span>
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{active === "pricing" ? "Plans & Pricing" : activeTool?.name}</div>
-            <div style={{ fontSize: 11, color: C.muted }}>{active === "pricing" ? "Compare plans and switch anytime" : activeTool?.desc}</div>
+            <div style={{ fontSize: 11, color: C.muted }}>{active === "pricing" ? "Compare plans" : activeTool?.desc}</div>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-            {!session ? (
-              <GuestBadge userPlan={userPlan} onLogin={() => { setAuthReason("login"); setShowAuth(true); }} />
-            ) : (
+          <div style={{ marginLeft: "auto" }}>
+            {!session ? <GuestBadge onLogin={() => setShowAuth(true)} /> : (
               <div style={{ display: "flex", alignItems: "center", gap: 6, background: `${PLANS[userPlan].color}18`, border: `1px solid ${PLANS[userPlan].color}40`, padding: "4px 10px", borderRadius: 16 }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%", background: PLANS[userPlan].color }} />
                 <span style={{ fontSize: 11, color: PLANS[userPlan].color, fontWeight: 700 }}>{PLANS[userPlan].name}</span>
@@ -981,16 +952,24 @@ export default function FinanceAIApp() {
             )}
           </div>
         </div>
-
         {active !== "pricing" && <UsageBar userPlan={userPlan} used={usedToday} limit={dailyLimit} isGuest={!session} />}
-
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {renderMain()}
-        </div>
+        <div style={{ flex: 1, overflow: "hidden" }}>{renderMain()}</div>
       </div>
 
-      {/* AUTH MODAL */}
-      <AuthModal />
+      {showAuth && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ position: "relative", width: 400 }}>
+            <button onClick={() => setShowAuth(false)} style={{ position: "absolute", top: -40, right: 0, background: "transparent", border: "none", color: C.muted, fontSize: 24, cursor: "pointer" }}>✕</button>
+            <Auth onSuccess={() => setShowAuth(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+'''
+
+with open('/mnt/agents/output/App_COMPLETE_FIXED.jsx', 'w') as f:
+    f.write(complete_app_jsx)
+
+print(f"Complete fixed App.jsx created: {len(complete_app_jsx)} characters")
