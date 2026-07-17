@@ -13,7 +13,7 @@ async function callGroq(prompt, systemPrompt, premium = false) {
     },
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
-      max_tokens: premium ? 1200 : 600,
+      max_tokens: premium ? 1800 : 1000,
       temperature: premium ? 0.4 : 0.7,
       messages: [
         {
@@ -61,7 +61,7 @@ async function callGemini(prompt, systemPrompt, file, files) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { maxOutputTokens: hasAnyFile ? 3000 : 800 },
+        generationConfig: { maxOutputTokens: hasAnyFile ? 3000 : 1600 },
       }),
     }
   );
@@ -119,7 +119,7 @@ async function callClaude(prompt, systemPrompt, file, files) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: hasAnyFile ? 3000 : 1200,
+      max_tokens: hasAnyFile ? 3000 : 1800,
       system: systemPrompt,
       messages: [{ role: "user", content }],
     }),
